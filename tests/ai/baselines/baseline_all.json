@@ -1,0 +1,3159 @@
+{
+  "created_at": 1787371761.050998,
+  "machine": {
+    "platform": "macOS-15.7.5-arm64-arm-64bit",
+    "python": "3.11.7",
+    "processor": "arm",
+    "av": "18.1.0",
+    "numpy": "2.4.6",
+    "PySide6": "6.11.2"
+  },
+  "model_bundle": "baseline",
+  "split": "all",
+  "seed": 0,
+  "pass_rate": 1.0,
+  "clips": [
+    {
+      "clip_id": "track_ball_normal",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.24231360583630815,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.23279363801872333,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06427212501876056,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_hard",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "ci",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.06327514408502738,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0569438883551155,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.060299791977740824,
+      "error": null
+    },
+    {
+      "clip_id": "track_pendulum_normal",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.15479539427485192,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.15439054748098696,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08133620803710073,
+      "error": null
+    },
+    {
+      "clip_id": "track_slider_normal",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.7149063255237627,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.7108992821009731,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06069258303614333,
+      "error": null
+    },
+    {
+      "clip_id": "track_projectile_normal",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.1836180844383362,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.4083835143059766,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06009195902151987,
+      "error": null
+    },
+    {
+      "clip_id": "calib_reliable",
+      "task": "calibration",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.004710186693089185,
+          "threshold": 0.01,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.2521996622261611,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.43185298621745716,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.001651583006605506,
+      "error": null
+    },
+    {
+      "clip_id": "calib_no_ruler",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "ci",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "rejection_when_no_ruler",
+          "value": 1.0,
+          "threshold": 1.0,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0029255420085974038,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_normal",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.017140507982107117,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08690445800311863,
+      "error": null
+    },
+    {
+      "clip_id": "pose_jump_hard",
+      "task": "pose",
+      "difficulty": "hard",
+      "split": "ci",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 0.9976470588235294,
+          "threshold": 0.85,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.002352941176470588,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.022509561330132384,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 5.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0712856249883771,
+      "error": null
+    },
+    {
+      "clip_id": "physics_pendulum",
+      "task": "physics",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "color_blob_tracker+physics",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "period_relative_error",
+          "value": 1.8503717077085943e-16,
+          "threshold": 0.02,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "gravity_relative_error",
+          "value": 3.621522608359328e-16,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "velocity_relative_error",
+          "value": null,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "acceleration_relative_error",
+          "value": null,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "center_median_px",
+          "value": 0.15479539427485192,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.15439054748098696,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08232074999250472,
+      "error": null
+    },
+    {
+      "clip_id": "track_turntable_normal",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.19030417295577412,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.20665495310619597,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06269370799418539,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_blur_hard",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.3076935604204414,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.2916833749699339,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.05463454202981666,
+      "error": null
+    },
+    {
+      "clip_id": "track_pendulum_shake_hard",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.137477382238966,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.20220226450275214,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06546250003157184,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_15fps_hard",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.24665526937257592,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.2419921186616251,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.043059625022578984,
+      "error": null
+    },
+    {
+      "clip_id": "calib_oblique_hard",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.004629628337200473,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.22458786404030207,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.26984126984127244,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0015435419627465308,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_sparse",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.017140507982107117,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08647712500533089,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_normal_slot11",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.24231360583630815,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.23279363801872333,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06716483295895159,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_hard_slot12",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.06327514408502738,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0569438883551155,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06787504203384742,
+      "error": null
+    },
+    {
+      "clip_id": "track_pendulum_normal_slot13",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.15479539427485192,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.15439054748098696,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08250866702292114,
+      "error": null
+    },
+    {
+      "clip_id": "track_slider_normal_slot14",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.7149063255237627,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.7108992821009731,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.061053625016938895,
+      "error": null
+    },
+    {
+      "clip_id": "track_projectile_normal_slot15",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.1836180844383362,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.4083835143059766,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06051733298227191,
+      "error": null
+    },
+    {
+      "clip_id": "physics_pendulum_slot16",
+      "task": "physics",
+      "difficulty": "normal",
+      "split": "holdout",
+      "model": "color_blob_tracker+physics",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "period_relative_error",
+          "value": 1.8503717077085943e-16,
+          "threshold": 0.02,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "gravity_relative_error",
+          "value": 3.621522608359328e-16,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "velocity_relative_error",
+          "value": null,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "acceleration_relative_error",
+          "value": null,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "center_median_px",
+          "value": 0.15479539427485192,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.15439054748098696,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08176575001562014,
+      "error": null
+    },
+    {
+      "clip_id": "track_turntable_normal_slot17",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.19030417295577412,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.20665495310619597,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06260775000555441,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_blur_hard_slot18",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.3076935604204414,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.2916833749699339,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.05542858398985118,
+      "error": null
+    },
+    {
+      "clip_id": "track_pendulum_shake_hard_slot19",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.137477382238966,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.20220226450275214,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06558887497521937,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_15fps_hard_slot20",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.24665526937257592,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.2419921186616251,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.04286591603886336,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_normal_slot21",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.24231360583630815,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.23279363801872333,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06494208303047344,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_hard_slot22",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.06327514408502738,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0569438883551155,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06507104099728167,
+      "error": null
+    },
+    {
+      "clip_id": "track_pendulum_normal_slot23",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.15479539427485192,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.15439054748098696,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0826544999727048,
+      "error": null
+    },
+    {
+      "clip_id": "track_slider_normal_slot24",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.7149063255237627,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.7108992821009731,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06142904201988131,
+      "error": null
+    },
+    {
+      "clip_id": "track_projectile_normal_slot25",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.1836180844383362,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.4083835143059766,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06168158299988136,
+      "error": null
+    },
+    {
+      "clip_id": "physics_pendulum_slot26",
+      "task": "physics",
+      "difficulty": "normal",
+      "split": "holdout",
+      "model": "color_blob_tracker+physics",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "period_relative_error",
+          "value": 1.8503717077085943e-16,
+          "threshold": 0.02,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "gravity_relative_error",
+          "value": 3.621522608359328e-16,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "velocity_relative_error",
+          "value": null,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "acceleration_relative_error",
+          "value": null,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "center_median_px",
+          "value": 0.15479539427485192,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.15439054748098696,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08338574995286763,
+      "error": null
+    },
+    {
+      "clip_id": "track_turntable_normal_slot27",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "holdout",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.19030417295577412,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.20665495310619597,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06264804198872298,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_blur_hard_slot28",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "holdout",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.3076935604204414,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.2916833749699339,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.055077249999158084,
+      "error": null
+    },
+    {
+      "clip_id": "track_pendulum_shake_hard_slot29",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "holdout",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.137477382238966,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.20220226450275214,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.06584375002421439,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_15fps_hard_slot30",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "holdout",
+      "model": "color_blob_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.24665526937257592,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.2419921186616251,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0428689579712227,
+      "error": null
+    },
+    {
+      "clip_id": "calib_reliable_slot31",
+      "task": "calibration",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.004710186693089185,
+          "threshold": 0.01,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.2521996622261611,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.43185298621745716,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.001534709008410573,
+      "error": null
+    },
+    {
+      "clip_id": "calib_no_ruler_slot32",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "rejection_when_no_ruler",
+          "value": 1.0,
+          "threshold": 1.0,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.003138334024697542,
+      "error": null
+    },
+    {
+      "clip_id": "calib_oblique_hard_slot33",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.004629628337200473,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.22458786404030207,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.26984126984127244,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0016178330406546593,
+      "error": null
+    },
+    {
+      "clip_id": "calib_reliable_slot34",
+      "task": "calibration",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.004710186693089185,
+          "threshold": 0.01,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.2521996622261611,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.43185298621745716,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0014990839990787208,
+      "error": null
+    },
+    {
+      "clip_id": "calib_no_ruler_slot35",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "rejection_when_no_ruler",
+          "value": 1.0,
+          "threshold": 1.0,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0028561250073835254,
+      "error": null
+    },
+    {
+      "clip_id": "calib_oblique_hard_slot36",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.004629628337200473,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.22458786404030207,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.26984126984127244,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0014852919848635793,
+      "error": null
+    },
+    {
+      "clip_id": "calib_reliable_slot37",
+      "task": "calibration",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.004710186693089185,
+          "threshold": 0.01,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.2521996622261611,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.43185298621745716,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0014038750086911023,
+      "error": null
+    },
+    {
+      "clip_id": "calib_no_ruler_slot38",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "rejection_when_no_ruler",
+          "value": 1.0,
+          "threshold": 1.0,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0030655000009573996,
+      "error": null
+    },
+    {
+      "clip_id": "calib_oblique_hard_slot39",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.004629628337200473,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.22458786404030207,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.26984126984127244,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0015600420301780105,
+      "error": null
+    },
+    {
+      "clip_id": "calib_reliable_slot40",
+      "task": "calibration",
+      "difficulty": "normal",
+      "split": "holdout",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.004710186693089185,
+          "threshold": 0.01,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.2521996622261611,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.43185298621745716,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0014701249892823398,
+      "error": null
+    },
+    {
+      "clip_id": "calib_no_ruler_slot41",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "holdout",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "rejection_when_no_ruler",
+          "value": 1.0,
+          "threshold": 1.0,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.002911499992478639,
+      "error": null
+    },
+    {
+      "clip_id": "calib_oblique_hard_slot42",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "holdout",
+      "model": "edge_ruler_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.004629628337200473,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.22458786404030207,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.26984126984127244,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.001540917030069977,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_normal_slot43",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.017140507982107117,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08619504200760275,
+      "error": null
+    },
+    {
+      "clip_id": "pose_jump_hard_slot44",
+      "task": "pose",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 0.9976470588235294,
+          "threshold": 0.85,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.002352941176470588,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.022509561330132384,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 5.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.07177524996222928,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_sparse_slot45",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.017140507982107117,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08675899996887892,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_normal_slot46",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.017140507982107117,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08623258303850889,
+      "error": null
+    },
+    {
+      "clip_id": "pose_jump_hard_slot47",
+      "task": "pose",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 0.9976470588235294,
+          "threshold": 0.85,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.002352941176470588,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.022509561330132384,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 5.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0711864999611862,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_sparse_slot48",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.017140507982107117,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08649466704810038,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_normal_slot49",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.017140507982107117,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08631187496939674,
+      "error": null
+    },
+    {
+      "clip_id": "pose_jump_hard_slot50",
+      "task": "pose",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 0.9976470588235294,
+          "threshold": 0.85,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.002352941176470588,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.022509561330132384,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 5.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.07157854200340807,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_sparse_slot51",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.017140507982107117,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0872628329670988,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_normal_slot52",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "holdout",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.017140507982107117,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08782954199705273,
+      "error": null
+    },
+    {
+      "clip_id": "pose_jump_hard_slot53",
+      "task": "pose",
+      "difficulty": "hard",
+      "split": "holdout",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 0.9976470588235294,
+          "threshold": 0.85,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.002352941176470588,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.022509561330132384,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 5.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.07143762498162687,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_sparse_slot54",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "holdout",
+      "model": "template_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 0.017140507982107117,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.08603012497769669,
+      "error": null
+    }
+  ],
+  "regression": {
+    "status": "compared",
+    "blocking": false,
+    "count": 0,
+    "items": []
+  }
+}

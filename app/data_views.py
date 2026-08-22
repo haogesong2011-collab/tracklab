@@ -1,0 +1,400 @@
+"""Selectable x / y / vₓ / vᵧ plots for the active track."""
+
+from __future__ import annotations
+
+from PySide6.QtCharts import QChart, QChartView, QLineSeries, QScatterSeries, QValueAxis
+from PySide6.QtCore import QMargins, QPointF, Qt, Signal
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ai.kinematics import KinematicSample, contiguous_segments, is_low_confidence
+
+WARN = QColor("#f0c14b")
+
+
+VX_NAME = "vₓ"
+VY_NAME = "vᵧ"
+
+
+def chart_series(position_unit: str = "px", speed_unit: str = "px/s") -> dict[str, tuple[str, str, str, str]]:
+    return {
+        "x": ("x", "x", "#6cb6ff", f"x ({position_unit})"),
+        "y": ("y", "y", "#7dce82", f"y ({position_unit})"),
+        "vx": ("vx", VX_NAME, "#e07a5f", f"{VX_NAME} ({speed_unit})"),
+        "vy": ("vy", VY_NAME, "#d4a373", f"{VY_NAME} ({speed_unit})"),
+    }
+
+
+CHART_SERIES = chart_series()
+
+
+class TrackChartView(QChartView):
+    frame_activated = Signal(int)
+
+    def __init__(
+        self,
+        specs: list[tuple[str, str, str]],
+        y_title: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("trackChartView")
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setStyleSheet("background: #232323; border: none;")
+        self._specs = specs
+        self._samples: list[KinematicSample] = []
+        self._series: list[QLineSeries] = []
+        self._highlight_t: float | None = None
+        self._zoom = 1.0
+        self._center_t: float | None = None
+        self._center_v: float | None = None
+        self._fitted_t = (0.0, 1.0)
+        self._fitted_v = (-1.0, 1.0)
+
+        chart = QChart()
+        panel = QColor("#232323")
+        chart.setBackgroundBrush(panel)
+        chart.setPlotAreaBackgroundBrush(panel)
+        chart.setPlotAreaBackgroundVisible(True)
+        chart.setDropShadowEnabled(False)
+        chart.legend().hide()
+        chart.setBackgroundRoundness(0)
+        chart.setMargins(QMargins(0, 0, 4, 0))
+        layout = chart.layout()
+        if layout is not None:
+            layout.setContentsMargins(0, 0, 0, 0)
+        self.setChart(chart)
+
+        self._axis_time = QValueAxis()
+        self._axis_value = QValueAxis()
+        for axis, title in ((self._axis_time, "t (s)"), (self._axis_value, y_title)):
+            axis.setLabelsColor(QColor("#9a9a9a"))
+            axis.setTitleBrush(QColor("#bdbdbd"))
+            axis.setGridLineColor(QColor("#2f2f2f"))
+            axis.setLinePenColor(QColor("#4a4a4a"))
+            axis.setTitleText(title)
+        chart.addAxis(self._axis_time, Qt.AlignmentFlag.AlignBottom)
+        chart.addAxis(self._axis_value, Qt.AlignmentFlag.AlignLeft)
+
+        self._cursor = QLineSeries()
+        self._cursor.setName("")
+        pen = QPen(QColor("#f0c14b"))
+        pen.setWidth(1)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        self._cursor.setPen(pen)
+        chart.addSeries(self._cursor)
+        self._cursor.attachAxis(self._axis_time)
+        self._cursor.attachAxis(self._axis_value)
+        for marker in chart.legend().markers(self._cursor):
+            marker.setVisible(False)
+
+    def set_spec(self, attr: str, name: str, color: str, y_title: str) -> None:
+        self._specs = [(attr, name, color)]
+        self._axis_value.setTitleText(y_title)
+        self._zoom = 1.0
+        self._center_t = None
+        self._center_v = None
+        self.set_samples(self._samples)
+
+    def set_samples(self, samples: list[KinematicSample]) -> None:
+        chart = self.chart()
+        for series in self._series:
+            chart.removeSeries(series)
+        self._series = []
+        self._samples = samples
+        if not samples:
+            self._fitted_t = (0.0, 1.0)
+            self._fitted_v = (-1.0, 1.0)
+            self._zoom = 1.0
+            self._center_t = None
+            self._center_v = None
+            self._apply_view()
+            self._cursor.clear()
+            return
+
+        for attr, name, color in self._specs:
+            first = True
+            for segment in contiguous_segments(samples, attr):
+                series = QLineSeries()
+                series.setName(name if first else "")
+                series.setPen(QPen(QColor(color), 1.8))
+                for sample in segment:
+                    series.append(sample.time_s, float(getattr(sample, attr)))
+                chart.addSeries(series)
+                series.attachAxis(self._axis_time)
+                series.attachAxis(self._axis_value)
+                self._series.append(series)
+                first = False
+            scatter = QScatterSeries()
+            scatter.setName("")
+            scatter.setMarkerSize(7)
+            scatter.setColor(WARN)
+            scatter.setBorderColor(WARN)
+            has_low = False
+            for sample in samples:
+                value = getattr(sample, attr)
+                if value is None or not is_low_confidence(sample):
+                    continue
+                scatter.append(sample.time_s, float(value))
+                has_low = True
+            if has_low:
+                chart.addSeries(scatter)
+                scatter.attachAxis(self._axis_time)
+                scatter.attachAxis(self._axis_value)
+                self._series.append(scatter)  # type: ignore[arg-type]
+
+        self._fit_axes(samples)
+        for marker in chart.legend().markers():
+            if not marker.series().name():
+                marker.setVisible(False)
+        if self._highlight_t is not None:
+            self.highlight_time(self._highlight_t)
+        else:
+            self.highlight_time(samples[0].time_s)
+
+    def highlight_frame(self, frame: int) -> None:
+        for sample in self._samples:
+            if sample.frame == frame:
+                self.highlight_time(sample.time_s)
+                return
+
+    def highlight_time(self, time_s: float) -> None:
+        self._highlight_t = time_s
+        self._cursor.replace(
+            [
+                QPointF(time_s, self._axis_value.min()),
+                QPointF(time_s, self._axis_value.max()),
+            ]
+        )
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: ANN001
+        if event.button() != Qt.MouseButton.LeftButton or not self._samples:
+            super().mousePressEvent(event)
+            return
+        series = self._series[0] if self._series else self._cursor
+        value = self.chart().mapToValue(event.position(), series)
+        nearest = min(self._samples, key=lambda s: abs(s.time_s - value.x()))
+        self.frame_activated.emit(nearest.frame)
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: ANN001
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.reset_zoom()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: ANN001
+        if not self._samples:
+            super().wheelEvent(event)
+            return
+        steps = event.angleDelta().y() / 120.0
+        if steps == 0:
+            super().wheelEvent(event)
+            return
+        series = self._series[0] if self._series else self._cursor
+        value = self.chart().mapToValue(event.position(), series)
+        self.zoom_at(1.15 ** steps, value.x(), value.y())
+        event.accept()
+
+    def zoom_in(self) -> None:
+        t, v = self._view_center()
+        self.zoom_at(1.25, t, v)
+
+    def zoom_out(self) -> None:
+        t, v = self._view_center()
+        self.zoom_at(1.0 / 1.25, t, v)
+
+    def reset_zoom(self) -> None:
+        self._zoom = 1.0
+        self._center_t = None
+        self._center_v = None
+        self._apply_view()
+
+    def zoom_at(self, factor: float, t: float, v: float) -> None:
+        old = self._zoom
+        new = max(0.8, min(40.0, old * factor))
+        if abs(new - old) < 1e-6:
+            return
+        t0, t1 = self._axis_time.min(), self._axis_time.max()
+        v0, v1 = self._axis_value.min(), self._axis_value.max()
+        rel_t = 0.5 if t1 <= t0 else (t - t0) / (t1 - t0)
+        rel_v = 0.5 if v1 <= v0 else (v - v0) / (v1 - v0)
+        self._zoom = new
+        ft0, ft1 = self._fitted_t
+        fv0, fv1 = self._fitted_v
+        tspan = (ft1 - ft0) / new
+        vspan = (fv1 - fv0) / new
+        self._center_t = t - (rel_t - 0.5) * tspan
+        self._center_v = v - (rel_v - 0.5) * vspan
+        self._apply_view()
+
+    def _view_center(self) -> tuple[float, float]:
+        return (
+            (self._axis_time.min() + self._axis_time.max()) / 2.0,
+            (self._axis_value.min() + self._axis_value.max()) / 2.0,
+        )
+
+    def _apply_view(self) -> None:
+        t0, t1 = self._fitted_t
+        v0, v1 = self._fitted_v
+        if self._zoom <= 1.0001 and self._center_t is None:
+            self._axis_time.setRange(t0, t1)
+            self._axis_value.setRange(v0, v1)
+        else:
+            tspan = (t1 - t0) / self._zoom
+            vspan = (v1 - v0) / self._zoom
+            ct = self._center_t if self._center_t is not None else (t0 + t1) / 2.0
+            cv = self._center_v if self._center_v is not None else (v0 + v1) / 2.0
+            self._axis_time.setRange(ct - tspan / 2.0, ct + tspan / 2.0)
+            self._axis_value.setRange(cv - vspan / 2.0, cv + vspan / 2.0)
+        if self._highlight_t is not None:
+            self.highlight_time(self._highlight_t)
+
+    def _fit_axes(self, samples: list[KinematicSample]) -> None:
+        times = [s.time_s for s in samples]
+        vals = [
+            float(getattr(sample, attr))
+            for sample in samples
+            for attr, _name, _color in self._specs
+            if getattr(sample, attr) is not None
+        ]
+        t0, t1 = min(times), max(times)
+        if t1 <= t0:
+            t1 = t0 + 1.0
+        pad = (t1 - t0) * 0.04
+        self._fitted_t = (t0 - pad, t1 + pad)
+        if vals:
+            lo, hi = min(vals), max(vals)
+            if lo == hi:
+                lo, hi = lo - 1, hi + 1
+            span = hi - lo
+            self._fitted_v = (lo - span * 0.08, hi + span * 0.08)
+        else:
+            self._fitted_v = (-1.0, 1.0)
+        self._apply_view()
+
+
+class TrackChartPanel(QWidget):
+    frame_activated = Signal(int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("trackChartPanel")
+        self._frame = 0
+        self._position_unit = "px"
+        self._speed_unit = "px/s"
+        self._selects: list[QComboBox] = []
+        self._charts: list[TrackChartView] = []
+
+        header = QHBoxLayout()
+        header.setContentsMargins(6, 2, 6, 0)
+        header.setSpacing(8)
+        title = QLabel("分图")
+        title.setObjectName("panelTitle")
+        hint = QLabel("滚轮缩放，双击复位")
+        hint.setObjectName("panelHint")
+        reset = QPushButton("复位")
+        reset.setObjectName("panelButton")
+        reset.setToolTip("恢复分图默认显示范围")
+        reset.clicked.connect(self.reset_zoom)
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(hint)
+        header.addWidget(reset)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
+        layout.addLayout(header)
+
+        series = chart_series()
+        for default in ("x", "y"):
+            combo = QComboBox()
+            combo.setObjectName("chartQuantity")
+            combo.setToolTip("选择这条分图显示的物理量")
+            for key, (_attr, _name, _color, title_text) in series.items():
+                combo.addItem(title_text, key)
+            combo.setCurrentIndex(list(series).index(default))
+            attr, name, color, axis = series[default]
+            chart = TrackChartView([(attr, name, color)], axis)
+            chart.frame_activated.connect(self.frame_activated.emit)
+            combo.currentIndexChanged.connect(
+                lambda _i, view=chart, box=combo: self._apply_quantity(view, box)
+            )
+            minus = QPushButton("－")
+            minus.setObjectName("panelButton")
+            minus.setFixedWidth(28)
+            minus.setToolTip("缩小")
+            minus.clicked.connect(chart.zoom_out)
+            plus = QPushButton("＋")
+            plus.setObjectName("panelButton")
+            plus.setFixedWidth(28)
+            plus.setToolTip("放大")
+            plus.clicked.connect(chart.zoom_in)
+            self._selects.append(combo)
+            self._charts.append(chart)
+
+            row = QWidget()
+            row.setObjectName("chartQuantityRow")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(6, 0, 4, 0)
+            row_layout.setSpacing(6)
+            row_layout.addWidget(combo, stretch=0)
+            row_layout.addStretch()
+            row_layout.addWidget(minus)
+            row_layout.addWidget(plus)
+            layout.addWidget(row)
+            layout.addWidget(chart, stretch=1)
+
+    def _series(self) -> dict[str, tuple[str, str, str, str]]:
+        return chart_series(self._position_unit, self._speed_unit)
+
+    def _apply_quantity(self, chart: TrackChartView, combo: QComboBox) -> None:
+        key = str(combo.currentData() or "x")
+        attr, name, color, axis = self._series().get(key, self._series()["x"])
+        chart.set_spec(attr, name, color, axis)
+        chart.highlight_frame(self._frame)
+
+    def set_units(self, position_unit: str, speed_unit: str) -> None:
+        if position_unit == self._position_unit and speed_unit == self._speed_unit:
+            return
+        keys = [str(box.currentData() or "x") for box in self._selects]
+        self._position_unit = position_unit
+        self._speed_unit = speed_unit
+        series = self._series()
+        for box, key, chart in zip(self._selects, keys, self._charts):
+            if key == "v":
+                key = "vx"
+            box.blockSignals(True)
+            box.clear()
+            for item_key, (_attr, _name, _color, title_text) in series.items():
+                box.addItem(title_text, item_key)
+            box.setCurrentIndex(list(series).index(key) if key in series else 0)
+            box.blockSignals(False)
+            self._apply_quantity(chart, box)
+
+    def set_samples(self, samples: list[KinematicSample]) -> None:
+        if samples:
+            self.set_units(samples[0].position_unit, samples[0].speed_unit)
+        for chart in self._charts:
+            chart.set_samples(samples)
+        self.highlight_frame(self._frame)
+
+    def highlight_frame(self, frame: int) -> None:
+        self._frame = frame
+        for chart in self._charts:
+            chart.highlight_frame(frame)
+
+    def reset_zoom(self) -> None:
+        for chart in self._charts:
+            chart.reset_zoom()

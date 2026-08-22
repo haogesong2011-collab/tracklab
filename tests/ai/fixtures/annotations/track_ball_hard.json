@@ -1,0 +1,692 @@
+{
+  "clip_id": "track_ball_hard",
+  "schema_version": "1.0.0",
+  "task": "track",
+  "scene": "ball",
+  "difficulty": "hard",
+  "width": 320,
+  "height": 180,
+  "fps": 30.0,
+  "frame_count": 45,
+  "track": [
+    {
+      "frame": 0,
+      "center": {
+        "x": 40.0,
+        "y": 90.0
+      },
+      "visible": true,
+      "bbox": {
+        "x": 30.0,
+        "y": 80.0,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 1,
+      "center": {
+        "x": 45.0,
+        "y": 92.96884751105428
+      },
+      "visible": true,
+      "bbox": {
+        "x": 35.0,
+        "y": 82.96884751105428,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 2,
+      "center": {
+        "x": 50.0,
+        "y": 95.75310646325043
+      },
+      "visible": true,
+      "bbox": {
+        "x": 40.0,
+        "y": 85.75310646325043,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 3,
+      "center": {
+        "x": 55.0,
+        "y": 98.17966512028
+      },
+      "visible": true,
+      "bbox": {
+        "x": 45.0,
+        "y": 88.17966512028,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 4,
+      "center": {
+        "x": 60.0,
+        "y": 100.09765181769475
+      },
+      "visible": true,
+      "bbox": {
+        "x": 50.0,
+        "y": 90.09765181769475,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 5,
+      "center": {
+        "x": 65.0,
+        "y": 101.38781543226703
+      },
+      "visible": true,
+      "bbox": {
+        "x": 55.0,
+        "y": 91.38781543226703,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 6,
+      "center": {
+        "x": 70.0,
+        "y": 101.96993983924865
+      },
+      "visible": true,
+      "bbox": {
+        "x": 60.0,
+        "y": 91.96993983924865,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 7,
+      "center": {
+        "x": 75.0,
+        "y": 101.80783136248724
+      },
+      "visible": true,
+      "bbox": {
+        "x": 65.0,
+        "y": 91.80783136248724,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 8,
+      "center": {
+        "x": 80.0,
+        "y": 100.91156912190817
+      },
+      "visible": true,
+      "bbox": {
+        "x": 70.0,
+        "y": 90.91156912190817,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 9,
+      "center": {
+        "x": 85.0,
+        "y": 99.33687836265506
+      },
+      "visible": true,
+      "bbox": {
+        "x": 75.0,
+        "y": 89.33687836265506,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 10,
+      "center": {
+        "x": 90.0,
+        "y": 97.18166572924747
+      },
+      "visible": true,
+      "bbox": {
+        "x": 80.0,
+        "y": 87.18166572924747,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 11,
+      "center": {
+        "x": 95.0,
+        "y": 94.57993190462798
+      },
+      "visible": true,
+      "bbox": {
+        "x": 85.0,
+        "y": 84.57993190462798,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 12,
+      "center": {
+        "x": 100.0,
+        "y": 91.6934400967184
+      },
+      "visible": true,
+      "bbox": {
+        "x": 90.0,
+        "y": 81.6934400967184,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 13,
+      "center": {
+        "x": 105.0,
+        "y": 88.7016583856387
+      },
+      "visible": true,
+      "bbox": {
+        "x": 95.0,
+        "y": 78.7016583856387,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 14,
+      "center": {
+        "x": 110.0,
+        "y": 85.79060126772457
+      },
+      "visible": true,
+      "bbox": {
+        "x": 100.0,
+        "y": 75.79060126772457,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 15,
+      "center": {
+        "x": 115.0,
+        "y": 83.14126417509188
+      },
+      "visible": true,
+      "bbox": {
+        "x": 105.0,
+        "y": 73.14126417509188,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 16,
+      "center": {
+        "x": 120.0,
+        "y": 80.91837005630487
+      },
+      "visible": true,
+      "bbox": {
+        "x": 110.0,
+        "y": 70.91837005630487,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 17,
+      "center": {
+        "x": 125.0,
+        "y": 79.260127701257
+      },
+      "visible": true,
+      "bbox": {
+        "x": 115.0,
+        "y": 69.260127701257,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 18,
+      "center": {
+        "x": 130.0,
+        "y": 90.0
+      },
+      "visible": false,
+      "bbox": {
+        "x": 120.0,
+        "y": 80.0,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": true
+    },
+    {
+      "frame": 19,
+      "center": {
+        "x": 135.0,
+        "y": 90.0
+      },
+      "visible": false,
+      "bbox": {
+        "x": 125.0,
+        "y": 80.0,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": true
+    },
+    {
+      "frame": 20,
+      "center": {
+        "x": 140.0,
+        "y": 90.0
+      },
+      "visible": false,
+      "bbox": {
+        "x": 130.0,
+        "y": 80.0,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": true
+    },
+    {
+      "frame": 21,
+      "center": {
+        "x": 145.0,
+        "y": 90.0
+      },
+      "visible": false,
+      "bbox": {
+        "x": 135.0,
+        "y": 80.0,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": true
+    },
+    {
+      "frame": 22,
+      "center": {
+        "x": 150.0,
+        "y": 90.0
+      },
+      "visible": false,
+      "bbox": {
+        "x": 140.0,
+        "y": 80.0,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": true
+    },
+    {
+      "frame": 23,
+      "center": {
+        "x": 155.0,
+        "y": 90.0
+      },
+      "visible": false,
+      "bbox": {
+        "x": 145.0,
+        "y": 80.0,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": true
+    },
+    {
+      "frame": 24,
+      "center": {
+        "x": 160.0,
+        "y": 90.0
+      },
+      "visible": false,
+      "bbox": {
+        "x": 150.0,
+        "y": 80.0,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": true
+    },
+    {
+      "frame": 25,
+      "center": {
+        "x": 165.0,
+        "y": 89.60184940142932
+      },
+      "visible": true,
+      "bbox": {
+        "x": 155.0,
+        "y": 79.60184940142932,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 26,
+      "center": {
+        "x": 170.0,
+        "y": 92.58143985705378
+      },
+      "visible": true,
+      "bbox": {
+        "x": 160.0,
+        "y": 82.58143985705378,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 27,
+      "center": {
+        "x": 175.0,
+        "y": 95.40052888536741
+      },
+      "visible": true,
+      "bbox": {
+        "x": 165.0,
+        "y": 85.40052888536741,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 28,
+      "center": {
+        "x": 180.0,
+        "y": 97.88383918462547
+      },
+      "visible": true,
+      "bbox": {
+        "x": 170.0,
+        "y": 87.88383918462547,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 29,
+      "center": {
+        "x": 185.0,
+        "y": 99.87697054813806
+      },
+      "visible": true,
+      "bbox": {
+        "x": 175.0,
+        "y": 89.87697054813806,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 30,
+      "center": {
+        "x": 190.0,
+        "y": 101.25599972129686
+      },
+      "visible": true,
+      "bbox": {
+        "x": 180.0,
+        "y": 91.25599972129686,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 31,
+      "center": {
+        "x": 195.0,
+        "y": 101.93518534933412
+      },
+      "visible": true,
+      "bbox": {
+        "x": 185.0,
+        "y": 91.93518534933412,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 32,
+      "center": {
+        "x": 200.0,
+        "y": 101.87229895948059
+      },
+      "visible": true,
+      "bbox": {
+        "x": 190.0,
+        "y": 91.87229895948059,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 33,
+      "center": {
+        "x": 205.0,
+        "y": 101.07125052287208
+      },
+      "visible": true,
+      "bbox": {
+        "x": 195.0,
+        "y": 91.07125052287208,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 34,
+      "center": {
+        "x": 210.0,
+        "y": 99.58184535148189
+      },
+      "visible": true,
+      "bbox": {
+        "x": 200.0,
+        "y": 89.58184535148189,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 35,
+      "center": {
+        "x": 215.0,
+        "y": 97.49668744505031
+      },
+      "visible": true,
+      "bbox": {
+        "x": 205.0,
+        "y": 87.49668744505031,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 36,
+      "center": {
+        "x": 220.0,
+        "y": 94.94542182290108
+      },
+      "visible": true,
+      "bbox": {
+        "x": 210.0,
+        "y": 84.94542182290108,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 37,
+      "center": {
+        "x": 225.0,
+        "y": 92.0866738245652
+      },
+      "visible": true,
+      "bbox": {
+        "x": 215.0,
+        "y": 82.0866738245652,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 38,
+      "center": {
+        "x": 230.0,
+        "y": 89.0981865544583
+      },
+      "visible": true,
+      "bbox": {
+        "x": 220.0,
+        "y": 79.0981865544583,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 39,
+      "center": {
+        "x": 235.0,
+        "y": 86.16576967653272
+      },
+      "visible": true,
+      "bbox": {
+        "x": 225.0,
+        "y": 76.16576967653272,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 40,
+      "center": {
+        "x": 240.0,
+        "y": 83.47174666932756
+      },
+      "visible": true,
+      "bbox": {
+        "x": 230.0,
+        "y": 73.47174666932756,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 41,
+      "center": {
+        "x": 245.0,
+        "y": 81.18361883514245
+      },
+      "visible": true,
+      "bbox": {
+        "x": 235.0,
+        "y": 71.18361883514245,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 42,
+      "center": {
+        "x": 250.0,
+        "y": 79.44365088033996
+      },
+      "visible": true,
+      "bbox": {
+        "x": 240.0,
+        "y": 69.44365088033996,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 43,
+      "center": {
+        "x": 255.0,
+        "y": 78.36002558495186
+      },
+      "visible": true,
+      "bbox": {
+        "x": 245.0,
+        "y": 68.36002558495186,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    },
+    {
+      "frame": 44,
+      "center": {
+        "x": 260.0,
+        "y": 78.00011752139156
+      },
+      "visible": true,
+      "bbox": {
+        "x": 250.0,
+        "y": 68.00011752139156,
+        "w": 20,
+        "h": 20
+      },
+      "occluded": false
+    }
+  ],
+  "pose": [],
+  "calibration": null,
+  "physics": null,
+  "notes": "synthetic translating ball"
+}

@@ -1,0 +1,1954 @@
+from __future__ import annotations
+
+import json
+import os
+import time
+from pathlib import Path
+
+from PySide6.QtCore import QByteArray, QEvent, QSettings, Qt, QTimer
+from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QImage, QKeySequence
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from app.icons import (
+    icon_size,
+    loop_icon,
+    pause_icon,
+    play_icon,
+    prev_icon,
+    toolbar_icon,
+)
+from app.calibration_dialog import CalibrationDialog
+from app.dock_workspace import DockWorkspace, _on_screen
+from app.frame_pump import FramePump
+from app.track_panels import TrackDataPanel, TrackListPanel
+from app.track_window import TrackManagerWindow
+from app.data_views import TrackChartPanel
+from app.view_toolbar import ViewToolbar
+from app.widgets import (
+    AXIS_MIN_LENGTH,
+    MODE_AXIS,
+    MODE_RULER,
+    MODE_TRACK,
+    DropHint,
+    OverlayTrack,
+    StepStepper,
+    TimelineSlider,
+    VideoInfoLabel,
+    VideoStage,
+    VideoView,
+    axis_arm_ends,
+    axis_display_length,
+    axis_pointer_angle,
+    snap_axis_angle,
+)
+from ai.calibration import (
+    CalibrationMode,
+    CalibrationState,
+    CoordinateFrame,
+    RulerRole,
+    RulerSegment,
+    near_far_state,
+    uniform_state,
+)
+from ai.contracts import (
+    TRACK_COLORS,
+    ProgressEvent,
+    PromptKind,
+    TrackLayer,
+    TrackPrompt,
+    TrackResult,
+)
+from ai.desktop import (
+    apply_manual_override,
+    export_track_csv,
+    new_track_id,
+    read_track_project,
+    run_shake_in_thread,
+    run_track_in_thread,
+    write_track_project,
+)
+from ai.kinematics import sample_at_frame, series_for_result
+from ai.model_manager import DEFAULT_SPEC
+from ai.sam2_tracker import merge_track_points
+from ai.schema import Point2D
+from ai.stabilize import ShakeCompensation, compensate_result
+from engine.video_index import VideoInfo
+
+VIDEO_FILTER = (
+    "视频文件 (*.mp4 *.mov *.m4v *.avi *.mkv *.webm *.mpg *.mpeg);;"
+    "所有文件 (*)"
+)
+PROJECT_FILTER = "TrackLab 项目 (*.json);;所有文件 (*)"
+VIDEO_SUFFIXES = {
+    ".mp4",
+    ".mov",
+    ".m4v",
+    ".avi",
+    ".mkv",
+    ".webm",
+    ".mpg",
+    ".mpeg",
+}
+STYLE_PATH = Path(__file__).with_name("style.qss")
+
+
+class MainWindow(QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("TrackLab")
+        self.resize(1280, 800)
+        self.setMinimumSize(900, 560)
+        self.setAcceptDrops(True)
+        self.setStyleSheet(STYLE_PATH.read_text(encoding="utf-8"))
+
+        self._info: VideoInfo | None = None
+        self._index = 0
+        self._playing = False
+        self._scrubbing = False
+        self._speed_factor = 1.0
+        self._pump: FramePump | None = None
+        self._pending_play_index: int | None = None
+        self._deadline = 0.0
+        self._ai_thread = None
+        self._ai_worker = None
+        self._shake_thread = None
+        self._shake_worker = None
+        self._shake: ShakeCompensation | None = None
+        self._shake_enabled = True
+        self._show_anchors = True
+        self._tracks: list[TrackLayer] = []
+        self._active_id: str | None = None
+        self._undo_stack: list[tuple[list[TrackLayer], str | None, CalibrationState]] = []
+        self._redo_stack: list[tuple[list[TrackLayer], str | None, CalibrationState]] = []
+        self._undoing = False
+        self._pending_project = None
+        self._show_contours = True
+        self._show_prompts = True
+        self._calibration = CalibrationState()
+        self._show_calibration = True
+        self._pending_rulers: list[RulerSegment] | None = None
+        self._axis_undo_pushed = False
+        self._axis_rotate_base: tuple[float, float] | None = None
+        self._cal_drawn_before_shake = False
+
+        self._video = VideoView()
+        self._hint = DropHint()
+        self._hint.clicked.connect(self._open_dialog)
+        self._stage = VideoStage(self._hint, self._video)
+        self._stack = self._stage.stack
+        self._video.clicked_at.connect(self._on_video_click)
+        self._video.prompted.connect(self._on_prompted)
+        self._video.boxed.connect(self._on_boxed)
+        self._video.ruler_drawn.connect(self._on_ruler_drawn)
+        self._video.axis_dragged.connect(self._on_axis_dragged)
+        self._video.axis_drag_finished.connect(self._on_axis_drag_finished)
+        self._video.axis_edit_requested.connect(self._start_axis_tool)
+        self._video.interaction_cancelled.connect(self._on_interaction_cancelled)
+
+        self._list_panel = TrackListPanel()
+        self._list_panel.new_requested.connect(self._new_track)
+        self._list_panel.delete_requested.connect(self._delete_track)
+        self._list_panel.selection_changed.connect(self._select_track)
+        self._list_panel.visibility_toggled.connect(self._toggle_track_visible)
+        self._list_panel.rename_requested.connect(self._rename_track)
+        self._list_panel.track_requested.connect(self._start_or_cancel_ai_track)
+        self._list_panel.cancel_requested.connect(self._cancel_ai_track)
+        self._list_panel.shake_toggled.connect(self._on_shake_apply_toggled)
+        self._track_window = TrackManagerWindow(self._list_panel, self)
+        self._track_window.set_visibility_hook(self._on_track_window_visible)
+
+        self._view_bar = ViewToolbar()
+        self._view_bar.track_selected.connect(self._select_track)
+        self._view_bar.visibility_toggled.connect(self._toggle_active_visible)
+        self._view_bar.position_edited.connect(self._on_position_edited)
+        self._view_bar.prev_point_requested.connect(lambda: self._step_track_point(-1))
+        self._view_bar.next_point_requested.connect(lambda: self._step_track_point(1))
+
+        self._data_panel = TrackDataPanel()
+        self._data_panel.frame_activated.connect(self._show_frame)
+        self._chart_panel = TrackChartPanel()
+        self._chart_panel.frame_activated.connect(self._show_frame)
+        self._workspace = DockWorkspace(self._stage, self._chart_panel, self._data_panel)
+        self._data_column = self._workspace.data_dock
+        self._workspace.chart_visibility_changed.connect(self._on_chart_dock_visible)
+        self._workspace.data_visibility_changed.connect(self._on_data_dock_visible)
+
+        self._cal_dialog = CalibrationDialog(self)
+        self._cal_dialog.mode_changed.connect(self._on_cal_mode_changed)
+        self._cal_dialog.apply_requested.connect(self._apply_pending_calibration)
+        self._cal_dialog.redraw_requested.connect(self._redraw_rulers)
+        self._cal_dialog.swap_requested.connect(self._swap_pending_rulers)
+        self._cal_dialog.length_changed.connect(self._on_cal_lengths)
+
+        self._frame_readout = QLabel("帧 0 / 0")
+        self._frame_readout.setObjectName("frameReadout")
+        self._frame_readout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        self._play_btn = QPushButton()
+        self._play_btn.setObjectName("playButton")
+        self._play_btn.setEnabled(False)
+        self._play_btn.setIconSize(icon_size())
+        self._play_btn.setToolTip("播放 / 暂停（空格）")
+        self._play_btn.clicked.connect(self._toggle_play)
+        self._set_play_icon(False)
+
+        self._prev_btn = self._icon_button(prev_icon(), "回到开头", self._jump_start)
+
+        self._slider = TimelineSlider()
+        self._slider.setEnabled(False)
+        self._slider.setRange(0, 0)
+        self._slider.setSingleStep(1)
+        self._slider.setPageStep(1)
+        self._slider.sliderPressed.connect(self._on_slider_pressed)
+        self._slider.valueChanged.connect(self._on_slider_value)
+        self._slider.sliderReleased.connect(self._on_slider_released)
+        self._slider.loop_range_changed.connect(self._on_loop_range_changed)
+
+        toolbar = self._build_toolbar()
+        self._video.zoom_changed.connect(self._on_zoom_changed)
+
+        self._speed = QComboBox()
+        self._speed.setObjectName("speedControl")
+        self._speed.addItems(["25%", "50%", "75%", "100%", "125%", "150%", "200%"])
+        self._speed.setCurrentText("100%")
+        self._speed.setFixedWidth(72)
+        self._speed.setToolTip("播放速度")
+        self._speed.currentTextChanged.connect(self._on_speed_changed)
+
+        self._stepper = StepStepper()
+        self._stepper.step_requested.connect(self._step)
+
+        self._loop_btn = QPushButton()
+        self._loop_btn.setObjectName("loopButton")
+        self._loop_btn.setIcon(loop_icon())
+        self._loop_btn.setIconSize(icon_size())
+        self._loop_btn.setCheckable(True)
+        self._loop_btn.setEnabled(False)
+        self._loop_btn.setToolTip("在标记范围内循环播放（拖动进度条上方的三角调整范围）")
+        self._loop_btn.toggled.connect(self._on_loop_toggled)
+
+        toolbar_shell = QWidget()
+        toolbar_shell.setObjectName("toolbarShell")
+        toolbar_shell.setFixedHeight(80)
+        toolbar_shell_layout = QVBoxLayout(toolbar_shell)
+        toolbar_shell_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_shell_layout.setSpacing(0)
+        toolbar_shell_layout.addWidget(toolbar)
+        toolbar_shell_layout.addWidget(self._view_bar)
+
+        transport = QWidget()
+        transport.setObjectName("transportBar")
+        transport.setFixedHeight(56)
+        controls = QHBoxLayout(transport)
+        controls.setContentsMargins(16, 6, 14, 6)
+        controls.setSpacing(6)
+        controls.addWidget(self._speed)
+        controls.addWidget(self._prev_btn)
+        controls.addWidget(self._play_btn)
+        controls.addSpacing(8)
+        controls.addWidget(self._slider, stretch=1)
+        controls.addWidget(self._frame_readout)
+        controls.addSpacing(6)
+        controls.addWidget(self._stepper)
+        controls.addSpacing(4)
+        controls.addWidget(self._loop_btn)
+
+        transport_shell = QWidget()
+        transport_shell.setObjectName("transportShell")
+        transport_shell.setFixedHeight(56)
+        transport_shell_layout = QVBoxLayout(transport_shell)
+        transport_shell_layout.setContentsMargins(0, 0, 0, 0)
+        transport_shell_layout.addWidget(transport)
+
+        root = QWidget()
+        root.setObjectName("root")
+        layout = QVBoxLayout(root)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(toolbar_shell)
+        layout.addWidget(self._workspace, stretch=1)
+        layout.addWidget(transport_shell)
+        self.setCentralWidget(root)
+        self.statusBar().setSizeGripEnabled(False)
+        self.statusBar().setFixedHeight(24)
+
+        self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._on_play_tick)
+
+        self._build_menu()
+        self._restore_window_prefs()
+        self._refresh_track_ui()
+
+    def _icon_button(self, icon, tooltip: str, slot) -> QPushButton:
+        button = QPushButton()
+        button.setObjectName("iconButton")
+        button.setEnabled(False)
+        button.setIcon(icon)
+        button.setIconSize(icon_size())
+        button.setToolTip(tooltip)
+        button.clicked.connect(slot)
+        return button
+
+    def _build_toolbar(self) -> QWidget:
+        toolbar = QWidget()
+        toolbar.setObjectName("toolBar")
+        toolbar.setFixedHeight(44)
+        layout = QHBoxLayout(toolbar)
+        layout.setContentsMargins(18, 0, 18, 0)
+        layout.setSpacing(4)
+
+        tools = [
+            ("open", "打开视频", self._open_dialog),
+            ("save", "保存项目", self._save_project),
+            ("video", "视频设置", None),
+            ("ruler", "标定尺", self._start_ruler_tool),
+            ("axis", "坐标系：点击工具或双击坐标轴进入编辑", self._start_axis_tool),
+            ("track", "轨迹", self._toggle_track_window),
+            ("ai", "SAM 自动跟踪", self._start_or_cancel_ai_track),
+            ("view", "显示选项", self._toggle_overlays),
+            ("zoom", "滚轮缩放，点击还原", self._reset_zoom),
+        ]
+        self._zoom_readout = QLabel("100%")
+        self._zoom_readout.setObjectName("zoomReadout")
+        self._ruler_btn: QToolButton | None = None
+        self._axis_btn: QToolButton | None = None
+        for index, (name, tooltip, slot) in enumerate(tools):
+            if index in (2, 5, 7):
+                divider = QWidget()
+                divider.setObjectName("toolDivider")
+                divider.setFixedSize(1, 22)
+                layout.addWidget(divider)
+                layout.addSpacing(4)
+            button = QToolButton()
+            button.setObjectName("toolButton")
+            button.setIcon(toolbar_icon(name))
+            button.setIconSize(icon_size())
+            button.setToolTip(tooltip)
+            if slot is not None:
+                button.clicked.connect(slot)
+            if name in {"ruler", "axis"}:
+                button.setCheckable(True)
+            if name == "ruler":
+                self._ruler_btn = button
+            elif name == "axis":
+                self._axis_btn = button
+            layout.addWidget(button)
+            if name == "zoom":
+                layout.addWidget(self._zoom_readout)
+
+        layout.addStretch()
+        self._video_info = VideoInfoLabel()
+        layout.addWidget(self._video_info, stretch=1)
+        cache_btn = QToolButton()
+        cache_btn.setObjectName("toolButton")
+        cache_btn.setIcon(toolbar_icon("cache"))
+        cache_btn.setIconSize(icon_size())
+        cache_btn.setToolTip("清理缓存")
+        cache_btn.clicked.connect(self._clear_cache)
+        layout.addWidget(cache_btn)
+        return toolbar
+
+    def _build_menu(self) -> None:
+        self.menuBar().setNativeMenuBar(False)
+        file_menu = self.menuBar().addMenu("文件")
+        open_action = QAction("打开视频…", self)
+        open_action.setShortcut(QKeySequence.StandardKey.Open)
+        open_action.triggered.connect(self._open_dialog)
+        file_menu.addAction(open_action)
+
+        open_project = QAction("打开项目…", self)
+        open_project.triggered.connect(self._open_project)
+        file_menu.addAction(open_project)
+
+        self._close_action = QAction("关闭视频", self)
+        self._close_action.setShortcut(QKeySequence.StandardKey.Close)
+        self._close_action.setEnabled(False)
+        self._close_action.triggered.connect(self.close_video)
+        file_menu.addAction(self._close_action)
+
+        self._save_action = QAction("保存项目…", self)
+        self._save_action.setShortcut(QKeySequence.StandardKey.Save)
+        self._save_action.setEnabled(False)
+        self._save_action.triggered.connect(self._save_project)
+        file_menu.addAction(self._save_action)
+
+        self._export_track_action = QAction("导出轨迹 JSON…", self)
+        self._export_track_action.setEnabled(False)
+        self._export_track_action.triggered.connect(self._export_track)
+        file_menu.addAction(self._export_track_action)
+
+        self._export_csv_action = QAction("导出轨迹 CSV…", self)
+        self._export_csv_action.setEnabled(False)
+        self._export_csv_action.triggered.connect(self._export_csv)
+        file_menu.addAction(self._export_csv_action)
+
+        edit_menu = self.menuBar().addMenu("编辑")
+        self._undo_action = QAction("撤销", self)
+        self._undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        self._undo_action.setEnabled(False)
+        self._undo_action.triggered.connect(self._undo)
+        edit_menu.addAction(self._undo_action)
+        self._redo_action = QAction("重做", self)
+        self._redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+        self._redo_action.setEnabled(False)
+        self._redo_action.triggered.connect(self._redo)
+        edit_menu.addAction(self._redo_action)
+        self._add_placeholders(edit_menu, ["首选项"])
+
+        play_menu = self.menuBar().addMenu("视频")
+        play_action = QAction("播放/暂停", self)
+        play_action.setShortcut(Qt.Key.Key_Space)
+        play_action.triggered.connect(self._toggle_play)
+        prev_action = QAction("上一帧", self)
+        prev_action.setShortcut(Qt.Key.Key_Left)
+        prev_action.triggered.connect(lambda: self._step(-self._stepper.value()))
+        next_action = QAction("下一帧", self)
+        next_action.setShortcut(Qt.Key.Key_Right)
+        next_action.triggered.connect(lambda: self._step(self._stepper.value()))
+        play_menu.addAction(play_action)
+        play_menu.addAction(prev_action)
+        play_menu.addAction(next_action)
+        play_menu.addSeparator()
+
+        mark_in = QAction("循环起点设为当前帧", self)
+        mark_in.setShortcut(Qt.Key.Key_I)
+        mark_in.triggered.connect(lambda: self._mark_loop("start"))
+        mark_out = QAction("循环终点设为当前帧", self)
+        mark_out.setShortcut(Qt.Key.Key_O)
+        mark_out.triggered.connect(lambda: self._mark_loop("end"))
+        reset_loop = QAction("循环范围恢复整段", self)
+        reset_loop.triggered.connect(self._reset_loop_range)
+        play_menu.addAction(mark_in)
+        play_menu.addAction(mark_out)
+        play_menu.addAction(reset_loop)
+
+        track_menu = self.menuBar().addMenu("轨迹")
+        self._ai_track_action = QAction("SAM 自动跟踪", self)
+        self._ai_track_action.setShortcut(Qt.Key.Key_T)
+        self._ai_track_action.setEnabled(False)
+        self._ai_track_action.triggered.connect(self._start_or_cancel_ai_track)
+        track_menu.addAction(self._ai_track_action)
+        self._cancel_ai_action = QAction("取消 AI 任务", self)
+        self._cancel_ai_action.setEnabled(False)
+        self._cancel_ai_action.triggered.connect(self._cancel_ai_track)
+        track_menu.addAction(self._cancel_ai_action)
+        new_track = track_menu.addAction("新建轨迹")
+        new_track.triggered.connect(self._new_track)
+        mgr = track_menu.addAction("轨迹管理器")
+        mgr.triggered.connect(self._toggle_track_window)
+        self._shake_action = QAction("背景补偿", self)
+        self._shake_action.setEnabled(False)
+        self._shake_action.triggered.connect(self._run_shake_compensation)
+        track_menu.addSeparator()
+        track_menu.addAction(self._shake_action)
+
+        view_menu = self.menuBar().addMenu("显示")
+        self._contour_action = QAction("显示分割轮廓", self)
+        self._contour_action.setCheckable(True)
+        self._contour_action.setChecked(True)
+        self._contour_action.toggled.connect(self._on_display_toggled)
+        self._prompt_action = QAction("显示提示点", self)
+        self._prompt_action.setCheckable(True)
+        self._prompt_action.setChecked(True)
+        self._prompt_action.toggled.connect(self._on_display_toggled)
+        self._shake_apply_action = QAction("应用背景补偿", self)
+        self._shake_apply_action.setCheckable(True)
+        self._shake_apply_action.setChecked(True)
+        self._shake_apply_action.toggled.connect(self._on_shake_apply_toggled)
+        self._anchor_action = QAction("显示四角参照点", self)
+        self._anchor_action.setCheckable(True)
+        self._anchor_action.setChecked(True)
+        self._anchor_action.toggled.connect(self._on_anchor_toggled)
+        view_menu.addAction(self._contour_action)
+        view_menu.addAction(self._prompt_action)
+        view_menu.addSeparator()
+        view_menu.addAction(self._shake_apply_action)
+        view_menu.addAction(self._anchor_action)
+
+        for title, items in (
+            ("坐标系", []),
+            ("AI助手", []),
+            ("窗口", []),
+            ("帮助", ["快速开始", "快捷键", "关于 TrackLab"]),
+        ):
+            menu = self.menuBar().addMenu(title)
+            if title == "坐标系":
+                set_ruler = menu.addAction("设置/重设标定尺")
+                set_ruler.triggered.connect(self._start_ruler_tool)
+                set_origin = menu.addAction("设置原点")
+                set_origin.triggered.connect(self._start_origin_only)
+                set_axis = menu.addAction("设置坐标轴")
+                set_axis.triggered.connect(self._start_axis_direction)
+                menu.addSeparator()
+                self._cal_overlay_action = QAction("显示标定叠加", self)
+                self._cal_overlay_action.setCheckable(True)
+                self._cal_overlay_action.setChecked(True)
+                self._cal_overlay_action.toggled.connect(self._on_cal_overlay_toggled)
+                menu.addAction(self._cal_overlay_action)
+                clear_cal = menu.addAction("清除标定")
+                clear_cal.triggered.connect(self._clear_calibration)
+            elif title == "AI助手":
+                auto = menu.addAction("自动识别目标")
+                auto.triggered.connect(self._start_or_cancel_ai_track)
+                self._ai_assist_action = auto
+                auto.setEnabled(False)
+                self._add_placeholders(menu, ["运动分析", "生成报告"])
+            elif title == "窗口":
+                self._track_window_action = QAction("轨迹管理器", self)
+                self._track_window_action.setCheckable(True)
+                self._track_window_action.toggled.connect(self._set_track_window_visible)
+                menu.addAction(self._track_window_action)
+                self._chart_action = QAction("分图", self)
+                self._chart_action.setCheckable(True)
+                self._chart_action.setChecked(True)
+                self._chart_action.toggled.connect(self._workspace.set_chart_visible)
+                menu.addAction(self._chart_action)
+                self._table_action = QAction("数据表", self)
+                self._table_action.setCheckable(True)
+                self._table_action.setChecked(True)
+                self._table_action.toggled.connect(self._workspace.set_data_visible)
+                menu.addAction(self._table_action)
+                menu.addSeparator()
+                menu.addAction("分图归位").triggered.connect(self._workspace.dock_chart)
+                menu.addAction("数据表归位").triggered.connect(self._workspace.dock_data)
+                menu.addAction("全部归位").triggered.connect(self._workspace.dock_all)
+                restore = menu.addAction("恢复默认布局")
+                restore.triggered.connect(self._restore_layout)
+            else:
+                self._add_placeholders(menu, items)
+
+    @staticmethod
+    def _add_placeholders(menu, labels: list[str]) -> None:
+        for label in labels:
+            action = menu.addAction(label)
+            action.setEnabled(False)
+
+    def closeEvent(self, event) -> None:  # noqa: ANN001
+        self._save_window_prefs()
+        self._pause()
+        self._stop_ai()
+        self._stop_shake()
+        self._stop_pump()
+        if self._track_window is not None:
+            self._track_window.hide()
+        if self._cal_dialog is not None:
+            self._cal_dialog.hide()
+        super().closeEvent(event)
+
+    def changeEvent(self, event) -> None:  # noqa: ANN001
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            if self._track_window.isVisible():
+                self._track_window.raise_()
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if self._first_video_path(event.mimeData().urls()):
+            self._hint.set_hover(True)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:  # noqa: ANN001
+        self._hint.set_hover(False)
+        event.accept()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        self._hint.set_hover(False)
+        path = self._first_video_path(event.mimeData().urls())
+        if path:
+            self.open_video(path)
+            event.acceptProposedAction()
+
+    def _first_video_path(self, urls) -> Path | None:
+        for url in urls:
+            path = Path(url.toLocalFile())
+            if path.suffix.lower() in VIDEO_SUFFIXES and path.is_file():
+                return path
+        return None
+
+    def _open_dialog(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "打开视频", "", VIDEO_FILTER)
+        if path:
+            self.open_video(Path(path))
+
+    def _open_project(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "打开项目", "", PROJECT_FILTER)
+        if not path:
+            return
+        doc = read_track_project(Path(path))
+        self._pending_project = doc
+        self.open_video(doc.video_path)
+
+    def close_video(self) -> None:
+        had_video = self._info is not None
+        self._pause()
+        self._stop_ai()
+        self._stop_shake()
+        self._stop_pump()
+        self._info = None
+        self._index = 0
+        self._tracks = []
+        self._active_id = None
+        self._pending_project = None
+        self._shake = None
+        self._calibration = CalibrationState()
+        self._pending_rulers = None
+        self._axis_undo_pushed = False
+        self._cal_drawn_before_shake = False
+        self._video.clear_track()
+        self._video_info.set_info(None)
+        self._cal_dialog.hide()
+        self._clear_history()
+        self._video.set_frame(None)
+        self._export_track_action.setEnabled(False)
+        self._export_csv_action.setEnabled(False)
+        self._set_has_video(False)
+        self._slider.blockSignals(True)
+        self._slider.setRange(0, 0)
+        self._slider.setValue(0)
+        self._slider.blockSignals(False)
+        self._reset_empty_chrome()
+        self._refresh_track_ui()
+        self.statusBar().showMessage(
+            "已关闭视频并释放解码缓存" if had_video else "当前没有打开的视频", 4000
+        )
+
+    def open_video(self, path: Path) -> None:
+        path = path.expanduser().resolve()
+        self._pause()
+        self._stop_ai()
+        self._stop_shake()
+        self._stop_pump()
+        self._info = None
+        self._index = 0
+        self._shake = None
+        self._calibration = CalibrationState()
+        self._pending_rulers = None
+        self._axis_undo_pushed = False
+        self._cal_drawn_before_shake = False
+        if self._pending_project is None:
+            self._tracks = []
+            self._active_id = None
+        self._clear_history()
+        self._video.clear_track()
+        self._video_info.set_info(None)
+        self._cal_dialog.hide()
+        self._video.set_frame(None)
+        self._export_track_action.setEnabled(False)
+        self._export_csv_action.setEnabled(False)
+        self._set_has_video(False)
+        self._slider.setRange(0, 0)
+        self._stack.setCurrentWidget(self._hint)
+        self._hint.set_status("正在读取视频索引…")
+        self.setWindowTitle(f"TrackLab — {path.name}")
+        self._set_cache_actions_enabled(True)
+        self.statusBar().clearMessage()
+
+        pump = FramePump(path, self)
+        pump.opened.connect(self._on_opened)
+        pump.ready.connect(self._on_frame_ready)
+        pump.failed.connect(self._on_open_failed)
+        self._pump = pump
+        pump.start()
+
+    def _reset_empty_chrome(self) -> None:
+        self._frame_readout.setText("帧 0 / 0")
+        self._stack.setCurrentWidget(self._hint)
+        self._hint.set_status("")
+        self.setWindowTitle("TrackLab")
+
+    def _stop_pump(self) -> None:
+        if self._pump is None:
+            return
+        pump = self._pump
+        self._pump = None
+        pump.blockSignals(True)
+        pump.stop()
+        pump.wait(5000)
+
+    def _on_opened(self, info: object) -> None:
+        if self.sender() is not self._pump:
+            return
+        assert isinstance(info, VideoInfo)
+        self._info = info
+        last = info.frame_count - 1
+        self._slider.setRange(0, last)
+        self._slider.set_loop_range(0, last)
+        self._set_has_video(True)
+        self._hint.set_status("")
+        if self._pending_project is not None:
+            self._tracks = list(self._pending_project.tracks)
+            self._active_id = self._pending_project.active_track_id
+            self._show_contours = self._pending_project.show_contours
+            self._show_prompts = self._pending_project.show_prompts
+            self._show_calibration = self._pending_project.show_calibration
+            self._calibration = self._pending_project.calibration
+            self._contour_action.setChecked(self._show_contours)
+            self._prompt_action.setChecked(self._show_prompts)
+            self._cal_overlay_action.setChecked(self._show_calibration)
+            self._pending_project = None
+        elif not self._tracks:
+            self._new_track()
+        self._video_info.set_info(info)
+        self._refresh_track_ui()
+        self.statusBar().showMessage(
+            f"{info.path.name}  ·  {info.width}×{info.height}"
+            f"  ·  {info.fps:.4g} fps  ·  {info.frame_count} 帧",
+            6000,
+        )
+        self._show_frame(0)
+
+    def _on_open_failed(self, message: str) -> None:
+        if self.sender() is not self._pump:
+            return
+        self._pause()
+        self._info = None
+        self._pending_project = None
+        self._set_has_video(False)
+        self._reset_empty_chrome()
+        self.statusBar().showMessage(message or "无法打开该视频", 8000)
+
+    def _on_frame_ready(self, index: int, image: QImage) -> None:
+        if self.sender() is not self._pump or self._info is None:
+            return
+        self._stack.setCurrentWidget(self._video)
+        self._video.set_frame(image, repaint=False)
+        self._apply_track_overlay(index)
+        if self._playing and index == self._pending_play_index:
+            self._schedule_next_frame()
+
+    def _set_has_video(self, enabled: bool) -> None:
+        self._play_btn.setEnabled(enabled)
+        self._prev_btn.setEnabled(enabled)
+        self._slider.setEnabled(enabled)
+        self._stepper.setEnabled(enabled)
+        self._loop_btn.setEnabled(enabled)
+        self._speed.setEnabled(enabled)
+        self._ai_track_action.setEnabled(enabled)
+        self._ai_assist_action.setEnabled(enabled)
+        self._shake_action.setEnabled(enabled)
+        self._save_action.setEnabled(enabled)
+        self._set_cache_actions_enabled(enabled)
+
+    def _set_cache_actions_enabled(self, enabled: bool) -> None:
+        self._close_action.setEnabled(enabled)
+
+    def _toggle_play(self) -> None:
+        if self._info is None:
+            self._open_dialog()
+            return
+        if self._playing:
+            self._pause()
+        else:
+            self._play()
+
+    def _play(self) -> None:
+        if self._info is None:
+            return
+        start, end = self._play_bounds()
+        self._playing = True
+        self._set_play_icon(True)
+        self._deadline = time.perf_counter()
+        if self._index >= end:
+            self._request_play_frame(start)
+        else:
+            self._schedule_next_frame()
+
+    def _pause(self) -> None:
+        self._playing = False
+        self._pending_play_index = None
+        self._timer.stop()
+        self._set_play_icon(False)
+
+    def _jump_start(self) -> None:
+        if self._info is None:
+            return
+        self._pause()
+        self._show_frame(self._play_bounds()[0])
+
+    def _step(self, delta: int) -> None:
+        if self._info is None:
+            return
+        self._pause()
+        self._show_frame(self._index + delta)
+
+    def _play_bounds(self) -> tuple[int, int]:
+        assert self._info is not None
+        if self._loop_btn.isChecked():
+            start, end = self._slider.loop_range()
+            if end > start:
+                return start, end
+        return 0, self._info.frame_count - 1
+
+    def _schedule_next_frame(self) -> None:
+        assert self._info is not None
+        self._deadline += self._info.frame_delay_ms(self._index) / 1000.0 / self._speed_factor
+        remaining = self._deadline - time.perf_counter()
+        if remaining < -0.25:
+            self._deadline = time.perf_counter()
+            remaining = 0.0
+        self._timer.start(max(0, round(remaining * 1000)))
+
+    def _on_play_tick(self) -> None:
+        if not self._playing or self._info is None:
+            return
+        start, end = self._play_bounds()
+        nxt = self._index + 1
+        if nxt > end:
+            if not self._loop_btn.isChecked():
+                self._pause()
+                self._show_frame(end)
+                return
+            nxt = start
+        self._request_play_frame(nxt)
+
+    def _request_play_frame(self, index: int) -> None:
+        self._pending_play_index = index
+        self._show_frame(index)
+
+    def _on_speed_changed(self, text: str) -> None:
+        try:
+            self._speed_factor = max(0.05, int(text.rstrip("%")) / 100.0)
+        except ValueError:
+            self._speed_factor = 1.0
+        if self._playing:
+            self._deadline = time.perf_counter()
+            self._schedule_next_frame()
+
+    def _on_loop_toggled(self, enabled: bool) -> None:
+        if self._info is None:
+            return
+        if enabled:
+            start, end = self._slider.loop_range()
+            self.statusBar().showMessage(
+                f"循环播放：帧 {start + 1} – {end + 1}（拖动进度条上方三角调整，I / O 设为当前帧）",
+                6000,
+            )
+            if not start <= self._index <= end:
+                self._show_frame(start)
+        else:
+            self.statusBar().showMessage("循环播放已关闭", 3000)
+
+    def _on_loop_range_changed(self, start: int, end: int) -> None:
+        if self._info is None:
+            return
+        self.statusBar().showMessage(f"循环范围：帧 {start + 1} – {end + 1}", 3000)
+
+    def _mark_loop(self, which: str) -> None:
+        if self._info is None:
+            return
+        start, end = self._slider.loop_range()
+        if which == "start":
+            self._slider.set_loop_range(self._index, max(end, self._index))
+        else:
+            self._slider.set_loop_range(min(start, self._index), self._index)
+
+    def _reset_loop_range(self) -> None:
+        if self._info is None:
+            return
+        self._slider.set_loop_range(0, self._info.frame_count - 1)
+
+    def _on_slider_pressed(self) -> None:
+        self._pause()
+        self._scrubbing = True
+        self._show_frame(self._slider.value())
+
+    def _on_slider_value(self, value: int) -> None:
+        if self._info is None:
+            return
+        if self._scrubbing or not self._playing:
+            self._show_frame(value)
+
+    def _on_slider_released(self) -> None:
+        self._scrubbing = False
+        if self._info is None:
+            return
+        self._show_frame(self._slider.value())
+
+    def _show_frame(self, index: int) -> None:
+        if self._info is None or self._pump is None:
+            return
+        index = max(0, min(index, self._info.frame_count - 1))
+        self._index = index
+        if self._slider.value() != index:
+            self._slider.blockSignals(True)
+            self._slider.setValue(index)
+            self._slider.blockSignals(False)
+        self._frame_readout.setText(
+            f"帧 {index + 1} / {self._info.frame_count}"
+            f"   {_fmt_ms(self._info.pts_ms[index])}"
+        )
+        self._data_panel.highlight_frame(index)
+        self._chart_panel.highlight_frame(index)
+        self._sync_view_bar()
+        self._pump.request(index)
+
+    def _active_layer(self) -> TrackLayer | None:
+        return next((t for t in self._tracks if t.track_id == self._active_id), None)
+
+    def _copy_history(self) -> tuple[list[TrackLayer], str | None, CalibrationState]:
+        return (
+            [TrackLayer.from_dict(layer.to_dict()) for layer in self._tracks],
+            self._active_id,
+            CalibrationState.from_dict(self._calibration.to_dict()),
+        )
+
+    def _clear_history(self) -> None:
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._sync_undo_actions()
+
+    def _push_undo(self) -> None:
+        if self._undoing:
+            return
+        self._undo_stack.append(self._copy_history())
+        if len(self._undo_stack) > 50:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+        self._sync_undo_actions()
+
+    def _restore_history(
+        self, snapshot: tuple[list[TrackLayer], str | None, CalibrationState]
+    ) -> None:
+        tracks, active_id, calibration = snapshot
+        self._tracks = [TrackLayer.from_dict(layer.to_dict()) for layer in tracks]
+        self._active_id = active_id
+        self._calibration = CalibrationState.from_dict(calibration.to_dict())
+        for layer in self._tracks:
+            if layer.status == "running":
+                layer.status = "done" if layer.result is not None else "idle"
+        self._refresh_track_ui()
+
+    def _sync_undo_actions(self) -> None:
+        busy = self._ai_worker is not None
+        if getattr(self, "_undo_action", None) is None:
+            return
+        self._undo_action.setEnabled(bool(self._undo_stack) and not busy)
+        self._redo_action.setEnabled(bool(self._redo_stack) and not busy)
+
+    def _undo(self) -> None:
+        if not self._undo_stack or self._ai_worker is not None:
+            return
+        self._undoing = True
+        self._redo_stack.append(self._copy_history())
+        self._restore_history(self._undo_stack.pop())
+        self._undoing = False
+        self._sync_undo_actions()
+        self.statusBar().showMessage("已撤销", 3000)
+
+    def _redo(self) -> None:
+        if not self._redo_stack or self._ai_worker is not None:
+            return
+        self._undoing = True
+        self._undo_stack.append(self._copy_history())
+        self._restore_history(self._redo_stack.pop())
+        self._undoing = False
+        self._sync_undo_actions()
+        self.statusBar().showMessage("已重做", 3000)
+
+    def _new_track(self, *_args, record: bool = True) -> None:
+        if record:
+            self._push_undo()
+        index = len(self._tracks)
+        layer = TrackLayer(
+            track_id=new_track_id(),
+            name=f"轨迹 {index + 1}",
+            color=TRACK_COLORS[index % len(TRACK_COLORS)],
+            seed_frame=self._index,
+        )
+        self._tracks.append(layer)
+        self._active_id = layer.track_id
+        self._refresh_track_ui()
+        self._list_panel.set_hint("Control 拖动框选目标，Shift+Control 点击加点")
+
+    def _delete_track(self) -> None:
+        layer = self._active_layer()
+        if layer is None:
+            return
+        self._push_undo()
+        self._tracks = [t for t in self._tracks if t.track_id != layer.track_id]
+        self._active_id = self._tracks[0].track_id if self._tracks else None
+        self._refresh_track_ui()
+
+    def _select_track(self, track_id: str) -> None:
+        if track_id == self._active_id:
+            return
+        self._active_id = track_id
+        self._refresh_track_ui()
+
+    def _toggle_track_visible(self, track_id: str, visible: bool) -> None:
+        for layer in self._tracks:
+            if layer.track_id == track_id:
+                break
+        else:
+            return
+        if layer.visible == visible:
+            return
+        self._push_undo()
+        layer.visible = visible
+        self._apply_track_overlay()
+        self._view_bar.set_tracks(self._tracks, self._active_id)
+
+    def _toggle_active_visible(self, visible: bool) -> None:
+        if self._active_id is None:
+            return
+        self._toggle_track_visible(self._active_id, visible)
+        self._list_panel.set_tracks(self._tracks, self._active_id)
+
+    def _toggle_track_window(self, *_args) -> None:
+        self._set_track_window_visible(True)
+        self._track_window.raise_()
+        self._track_window.activateWindow()
+
+    def _set_track_window_visible(self, visible: bool) -> None:
+        if visible:
+            self._track_window.show()
+            self._track_window.raise_()
+        else:
+            self._track_window.hide()
+
+    def _on_track_window_visible(self, visible: bool) -> None:
+        if getattr(self, "_track_window_action", None) is None:
+            return
+        self._track_window_action.blockSignals(True)
+        self._track_window_action.setChecked(visible)
+        self._track_window_action.blockSignals(False)
+
+    def _on_chart_dock_visible(self, visible: bool) -> None:
+        if getattr(self, "_chart_action", None) is None:
+            return
+        self._chart_action.blockSignals(True)
+        self._chart_action.setChecked(visible)
+        self._chart_action.blockSignals(False)
+
+    def _on_data_dock_visible(self, visible: bool) -> None:
+        if getattr(self, "_table_action", None) is None:
+            return
+        self._table_action.blockSignals(True)
+        self._table_action.setChecked(visible)
+        self._table_action.blockSignals(False)
+
+    def _on_position_edited(self, x: float, y: float) -> None:
+        layer = self._active_layer()
+        if layer is None or layer.result is None:
+            return
+        px, py = x, y
+        if self._calibration.applies_transform():
+            pixel = self._calibration.world_to_pixel(x, y)
+            px, py = pixel.x, pixel.y
+        if self._shake_enabled and self._shake is not None:
+            dx, dy = self._shake.offset(self._index)
+            px += dx
+            py += dy
+        self._push_undo()
+        layer.result = apply_manual_override(layer.result, self._index, Point2D(px, py))
+        self._refresh_track_ui()
+        self.statusBar().showMessage(
+            f"已修正第 {self._index + 1} 帧 → ({x:.1f}, {y:.1f})", 4000
+        )
+
+    def _step_track_point(self, direction: int) -> None:
+        layer = self._active_layer()
+        if layer is None or layer.result is None:
+            return
+        frames = [p.frame for p in layer.result.points if p.visible]
+        if not frames:
+            return
+        if direction > 0:
+            nxt = next((f for f in frames if f > self._index), None)
+        else:
+            nxt = next((f for f in reversed(frames) if f < self._index), None)
+        if nxt is None:
+            return
+        if self._info is not None:
+            self._show_frame(nxt)
+            return
+        self._index = nxt
+        self._data_panel.highlight_frame(nxt)
+        self._chart_panel.highlight_frame(nxt)
+        self._sync_view_bar()
+
+    def _rename_track(self, track_id: str, name: str) -> None:
+        cleaned = name.strip()
+        if not cleaned:
+            return
+        for layer in self._tracks:
+            if layer.track_id == track_id:
+                if layer.name == cleaned:
+                    return
+                self._push_undo()
+                layer.name = cleaned
+                self._view_bar.set_tracks(self._tracks, self._active_id)
+                return
+
+    def _on_video_click(self, x: float, y: float) -> None:
+        # prompted signal handles seed / correction; keep slot for tests.
+        return
+
+    def _on_prompted(self, x: float, y: float, kind: str) -> None:
+        if self._info is None:
+            return
+        self._push_undo()
+        if self._active_layer() is None:
+            self._new_track(record=False)
+        layer = self._active_layer()
+        assert layer is not None
+        if layer.result is not None and kind == "positive":
+            layer.result = apply_manual_override(layer.result, self._index, Point2D(x, y))
+            layer.prompts.append(
+                TrackPrompt(frame=self._index, kind=PromptKind.POSITIVE, x=x, y=y)
+            )
+            self.statusBar().showMessage(
+                f"已修正第 {self._index + 1} 帧 → ({x:.1f}, {y:.1f})，可再按 T 从该帧重跟踪",
+                5000,
+            )
+        else:
+            prompt_kind = PromptKind.NEGATIVE if kind == "negative" else PromptKind.POSITIVE
+            layer.prompts.append(
+                TrackPrompt(frame=self._index, kind=prompt_kind, x=x, y=y)
+            )
+            layer.seed_frame = self._index
+            self.statusBar().showMessage(
+                f"{'负' if prompt_kind is PromptKind.NEGATIVE else '正'}点 "
+                f"({x:.1f}, {y:.1f}) @ 帧 {self._index + 1}",
+                4000,
+            )
+        self._refresh_track_ui()
+
+    def _on_boxed(self, x0: float, y0: float, x1: float, y1: float) -> None:
+        if self._info is None:
+            return
+        self._push_undo()
+        if self._active_layer() is None:
+            self._new_track(record=False)
+        layer = self._active_layer()
+        assert layer is not None
+        layer.prompts.append(
+            TrackPrompt(
+                frame=self._index,
+                kind=PromptKind.BOX,
+                x=x0,
+                y=y0,
+                x2=x1,
+                y2=y1,
+            )
+        )
+        layer.seed_frame = self._index
+        self._refresh_track_ui()
+        self.statusBar().showMessage(
+            f"已添加框选 ({x0:.0f},{y0:.0f})–({x1:.0f},{y1:.0f})", 4000
+        )
+
+    def _start_or_cancel_ai_track(self, *_args) -> None:
+        if self._info is None:
+            return
+        if self._ai_worker is not None:
+            self._cancel_ai_track()
+            return
+        layer = self._active_layer()
+        if layer is None:
+            self._new_track()
+            layer = self._active_layer()
+        assert layer is not None
+        if not layer.prompts:
+            self._list_panel.set_hint("请先 Control 拖动框选目标，或 Shift+Control 点击加点")
+            self.statusBar().showMessage("请先框选或加点，再开始跟踪", 5000)
+            return
+        if not self._ensure_sam_runtime():
+            return
+        self._push_undo()
+        seed_prompt = next(
+            (p for p in reversed(layer.prompts) if p.kind != PromptKind.NEGATIVE),
+            layer.prompts[-1],
+        )
+        seed = (seed_prompt.x, seed_prompt.y)
+        start = layer.seed_frame
+        if layer.prompts:
+            start = layer.prompts[-1].frame
+        end = self._play_bounds()[1]
+        layer.status = "running"
+        self._refresh_track_ui()
+        self._stop_shake()
+        thread, worker = run_track_in_thread(
+            self._info.path,
+            seed,
+            on_progress=self._on_ai_progress,
+            on_finished=self._on_ai_finished,
+            on_failed=self._on_ai_failed,
+            track_id=layer.track_id,
+            start_frame=start,
+            end_frame=end,
+            prompts=layer.prompts,
+        )
+        self._ai_thread = thread
+        self._ai_worker = worker
+        self._cancel_ai_action.setEnabled(True)
+        self._ai_track_action.setText("取消 SAM 跟踪")
+        self._list_panel.set_running(True)
+        self._sync_undo_actions()
+        self.statusBar().showMessage("SAM 2 跟踪进行中…（独立线程，不占用播放解码）")
+        thread.start()
+
+    def _ensure_sam_runtime(self) -> bool:
+        """Prompt once for Apache-2.0 weights. Never silently fall back to color blobs."""
+        try:
+            import sam2  # noqa: F401
+            import torch  # noqa: F401
+        except ImportError:
+            QMessageBox.warning(
+                self,
+                "未安装 SAM 2",
+                "桌面跟踪需要 PyTorch 与 SAM 2。\n请执行：pip install -r requirements-ai.txt",
+            )
+            return False
+        from ai.model_manager import ModelNotAvailable, checkpoint_path, ensure_checkpoint
+
+        try:
+            ensure_checkpoint(DEFAULT_SPEC, download=False)
+            return True
+        except ModelNotAvailable:
+            path = checkpoint_path()
+            reply = QMessageBox.question(
+                self,
+                "下载 SAM 2.1 Tiny",
+                (
+                    "首次跟踪需要下载官方权重（Apache-2.0，约 150 MB）。\n\n"
+                    f"保存到：{path}\n"
+                    f"来源：{DEFAULT_SPEC.url}\n"
+                    f"Hugging Face：{DEFAULT_SPEC.hf_id}\n"
+                    f"SHA-256：{DEFAULT_SPEC.sha256}\n\n"
+                    "确认下载？"
+                ),
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return False
+            self.statusBar().showMessage("正在下载并校验 SAM 2.1 Tiny 权重…")
+            try:
+                ensure_checkpoint(DEFAULT_SPEC, download=True)
+            except ModelNotAvailable as exc:
+                QMessageBox.warning(self, "权重下载失败", str(exc))
+                return False
+            self.statusBar().showMessage("权重已就绪", 4000)
+            return True
+
+    def _cancel_ai_track(self, *_args) -> None:
+        if self._ai_worker is not None:
+            self._ai_worker.cancel()
+            self.statusBar().showMessage("正在取消跟踪…", 3000)
+
+    def _stop_ai(self) -> None:
+        if self._ai_worker is not None:
+            self._ai_worker.cancel()
+        if self._ai_thread is not None:
+            self._ai_thread.quit()
+            self._ai_thread.wait(5000)
+        self._ai_thread = None
+        self._ai_worker = None
+        self._cancel_ai_action.setEnabled(False)
+        self._ai_track_action.setText("SAM 自动跟踪")
+        self._list_panel.set_running(False)
+        self._sync_undo_actions()
+
+    def _stop_shake(self) -> None:
+        if self._shake_worker is not None:
+            self._shake_worker.cancel()
+        if self._shake_thread is not None:
+            self._shake_thread.quit()
+            self._shake_thread.wait(5000)
+        self._shake_thread = None
+        self._shake_worker = None
+
+    def _run_shake_compensation(self, *_args) -> None:
+        if self._info is None:
+            return
+        if self._ai_worker is not None:
+            self.statusBar().showMessage("请等待 SAM 跟踪完成后再做背景补偿", 4000)
+            return
+        self._start_shake()
+
+    def _maybe_start_shake(self) -> None:
+        if self._info is None or self._shake is not None:
+            return
+        if self._ai_worker is not None or self._shake_worker is not None:
+            return
+        self._start_shake()
+
+    def _start_shake(self) -> None:
+        if self._info is None:
+            return
+        self._stop_shake()
+        thread, worker = run_shake_in_thread(
+            self._info.path,
+            on_progress=self._on_shake_progress,
+            on_finished=self._on_shake_finished,
+            on_failed=self._on_shake_failed,
+        )
+        self._shake_thread = thread
+        self._shake_worker = worker
+        self.statusBar().showMessage("正在根据四角参照点估计镜头抖动…")
+        thread.start()
+
+    def _on_shake_progress(self, event: ProgressEvent) -> None:
+        if self._ai_worker is not None:
+            return
+        self.statusBar().showMessage(
+            f"背景补偿 {event.current} / {event.total}", 800
+        )
+
+    def _migrate_calibration_after_shake(self) -> None:
+        """Rulers drawn before shake existed were stored in raw video pixels."""
+        if self._shake is None or not self._cal_drawn_before_shake:
+            return
+        self._cal_drawn_before_shake = False
+        dx, dy = self._shake.offset(0)
+        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+            return
+        for ruler in self._calibration.rulers:
+            ruler.a = Point2D(ruler.a.x - dx, ruler.a.y - dy)
+            ruler.b = Point2D(ruler.b.x - dx, ruler.b.y - dy)
+        if self._calibration.frame.origin_x is not None:
+            self._calibration.frame.origin_x -= dx
+        if self._calibration.frame.origin_y is not None:
+            self._calibration.frame.origin_y -= dy
+
+    def _on_shake_finished(self, shake: ShakeCompensation) -> None:
+        self._stop_shake()
+        if self._info is None:
+            return
+        self._shake = shake
+        self._migrate_calibration_after_shake()
+        self._refresh_track_ui()
+        n_frames = len(shake.dx)
+        n_anchors = len(shake.anchors_at(0)) if shake.anchors else 0
+        self.statusBar().showMessage(
+            f"背景补偿完成：已处理 {n_frames} 帧，锁定 {n_anchors} 个四角参照点。"
+            "数据表、分图和 CSV 使用补偿后坐标，画面上的轨迹仍与原视频对齐。",
+            8000,
+        )
+
+    def _on_shake_failed(self, message: str) -> None:
+        self._stop_shake()
+        self.statusBar().showMessage(message or "背景补偿失败", 8000)
+
+    def _analysis_result(self, layer: TrackLayer | None) -> TrackResult | None:
+        if layer is None or layer.result is None:
+            return None
+        if self._shake_enabled and self._shake is not None:
+            return compensate_result(layer.result, self._shake)
+        return layer.result
+
+    def _on_ai_progress(self, event: ProgressEvent) -> None:
+        self._list_panel.set_progress(event.current, event.total)
+        self.statusBar().showMessage(
+            f"SAM 跟踪 {event.current} / {event.total}", 800
+        )
+
+    def _on_ai_finished(self, result: TrackResult) -> None:
+        track_id = getattr(result, "track_id", None) or (
+            self._ai_worker.track_id if self._ai_worker is not None else self._active_id
+        )
+        layer = next((t for t in self._tracks if t.track_id == track_id), self._active_layer())
+        if layer is not None:
+            incoming_start = min((p.frame for p in result.points), default=self._index)
+            if layer.result is not None:
+                merged = merge_track_points(
+                    layer.result.points, result.points, incoming_start
+                )
+                result = TrackResult(
+                    clip_id=result.clip_id,
+                    points=merged,
+                    confidence=result.confidence,
+                    failure_reason=result.failure_reason,
+                    model_name=result.model_name,
+                    model_version=result.model_version,
+                    elapsed_s=result.elapsed_s,
+                )
+                layer.contours = {
+                    frame: pts
+                    for frame, pts in layer.contours.items()
+                    if frame < incoming_start
+                }
+            layer.result = result
+            layer.status = "done"
+            contours = getattr(result, "contours", None)
+            if isinstance(contours, dict):
+                layer.contours.update(contours)
+        self._export_track_action.setEnabled(True)
+        self._export_csv_action.setEnabled(True)
+        self._stop_ai()
+        self._refresh_track_ui()
+        n = sum(1 for p in result.points if p.visible)
+        self.statusBar().showMessage(
+            f"跟踪完成：{n} 个可见点（{result.model_name} {result.elapsed_s:.2f}s）。"
+            "Shift+Control 点击可修正当前帧，Control 拖动可再框选后重跟踪。",
+            8000,
+        )
+        self._maybe_start_shake()
+
+    def _on_ai_failed(self, message: str) -> None:
+        track_id = self._ai_worker.track_id if self._ai_worker is not None else self._active_id
+        layer = next((t for t in self._tracks if t.track_id == track_id), self._active_layer())
+        if layer is not None:
+            layer.status = "error"
+        self._stop_ai()
+        self._refresh_track_ui()
+        self.statusBar().showMessage(message or "SAM 跟踪失败", 8000)
+        if message:
+            QMessageBox.warning(self, "SAM 2 跟踪失败", message)
+
+    def _apply_track_overlay(self, index: int | None = None) -> None:
+        overlays: list[OverlayTrack] = []
+        seed = None
+        frame = self._index if index is None else index
+        for layer in self._tracks:
+            if not layer.visible:
+                continue
+            points = []
+            if layer.result is not None:
+                points = [
+                    (p.frame, p.x, p.y, p.visible, p.confidence) for p in layer.result.points
+                ]
+            contour = layer.contours.get(frame, [])
+            overlays.append(
+                OverlayTrack(
+                    points=points,
+                    color=layer.color,
+                    active=layer.track_id == self._active_id,
+                    contour=contour,
+                    prompts=layer.prompts,
+                )
+            )
+            if (
+                layer.track_id == self._active_id
+                and layer.prompts
+                and layer.result is None
+            ):
+                last = layer.prompts[-1]
+                seed = (last.x, last.y)
+        self._video.set_overlays(overlays, index=frame, seed=seed)
+        self._video.set_display_options(
+            contours=self._show_contours, prompts=self._show_prompts
+        )
+        anchors: list[tuple[float, float]] = []
+        if self._show_anchors and self._shake is not None:
+            anchors = self._shake.anchors_at(frame)
+        self._video.set_anchors(anchors)
+        self._sync_cal_overlay()
+
+    def _refresh_track_ui(self) -> None:
+        self._list_panel.set_tracks(self._tracks, self._active_id)
+        self._view_bar.set_tracks(self._tracks, self._active_id)
+        layer = self._active_layer()
+        analyzed = self._analysis_result(layer)
+        samples = series_for_result(analyzed, self._info, calibration=self._calibration)
+        self._data_panel.set_units(
+            self._calibration.position_unit, self._calibration.speed_unit
+        )
+        self._chart_panel.set_units(
+            self._calibration.position_unit, self._calibration.speed_unit
+        )
+        if layer is None:
+            self._data_panel.set_layer(None, self._info)
+        else:
+            self._data_panel.set_samples(samples)
+        self._chart_panel.set_samples(samples)
+        self._view_bar.set_units(self._calibration.position_unit)
+        self._sync_view_bar()
+        has_result = layer is not None and layer.result is not None
+        self._export_track_action.setEnabled(bool(has_result))
+        self._export_csv_action.setEnabled(bool(has_result))
+        self._apply_track_overlay()
+        if self._info is not None:
+            self._chart_panel.highlight_frame(self._index)
+            self._data_panel.highlight_frame(self._index)
+
+    def _sync_view_bar(self) -> None:
+        layer = self._active_layer()
+        samples = series_for_result(
+            self._analysis_result(layer), self._info, calibration=self._calibration
+        )
+        sample = sample_at_frame(samples, self._index)
+        self._view_bar.set_sample(sample)
+        if (
+            sample is not None
+            and sample.visible
+            and self._calibration.mode is CalibrationMode.NEAR_FAR
+        ):
+            analyzed = self._analysis_result(layer)
+            point = None if analyzed is None else next(
+                (p for p in analyzed.points if p.frame == self._index), None
+            )
+            if point is not None and self._calibration.is_extrapolated(point.x, point.y):
+                self.statusBar().showMessage("超出双尺覆盖区域，结果为外推值", 800)
+
+    def _toggle_overlays(self, *_args) -> None:
+        self._show_contours = not self._show_contours
+        self._contour_action.setChecked(self._show_contours)
+        self._apply_track_overlay()
+
+    def _on_display_toggled(self) -> None:
+        self._show_contours = self._contour_action.isChecked()
+        self._show_prompts = self._prompt_action.isChecked()
+        self._apply_track_overlay()
+
+    def _on_shake_apply_toggled(self, checked: bool) -> None:
+        self._shake_enabled = checked
+        if getattr(self, "_shake_apply_action", None) is not None:
+            self._shake_apply_action.blockSignals(True)
+            self._shake_apply_action.setChecked(checked)
+            self._shake_apply_action.blockSignals(False)
+        self._list_panel.set_shake_enabled(checked)
+        self._refresh_track_ui()
+
+    def _on_anchor_toggled(self, checked: bool) -> None:
+        self._show_anchors = checked
+        self._apply_track_overlay()
+
+    def _restore_layout(self) -> None:
+        self._workspace.restore_default()
+        if getattr(self, "_chart_action", None) is not None:
+            self._chart_action.setChecked(True)
+        if getattr(self, "_table_action", None) is not None:
+            self._table_action.setChecked(True)
+        self._toggle_track_window()
+
+    def _reset_zoom(self, *_args) -> None:
+        self._video.reset_zoom()
+
+    def _on_zoom_changed(self, zoom: float) -> None:
+        self._zoom_readout.setText(f"{zoom * 100:.0f}%")
+
+    def _clear_cache(self, *_args) -> None:
+        freed = self._pump.clear_cache() if self._pump is not None else 0
+        self._video.clear_scaled_cache()
+        if freed:
+            self.statusBar().showMessage(
+                f"已释放解码缓存 {freed / (1024 * 1024):.1f} MB", 4000
+            )
+        else:
+            self.statusBar().showMessage("没有可清理的解码缓存", 4000)
+
+    def _export_track(self) -> None:
+        layer = self._active_layer()
+        if layer is None or layer.result is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "导出轨迹 JSON", "", "JSON (*.json)")
+        if not path:
+            return
+        Path(path).write_text(
+            json.dumps(layer.result.to_dict(), indent=2), encoding="utf-8"
+        )
+        self.statusBar().showMessage(f"已保存轨迹 {path}", 4000)
+
+    def _export_csv(self) -> None:
+        layer = self._active_layer()
+        if layer is None or layer.result is None or self._info is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "导出轨迹 CSV", "", "CSV (*.csv)")
+        if not path:
+            return
+        dest = Path(path)
+        if dest.suffix.lower() != ".csv":
+            dest = dest.with_suffix(".csv")
+        analyzed = self._analysis_result(layer)
+        export_track_csv(
+            dest,
+            analyzed if analyzed is not None else layer.result,
+            self._info,
+            calibration=self._calibration,
+        )
+        self.statusBar().showMessage(f"已导出 CSV {dest}", 4000)
+
+    def _save_project(self) -> None:
+        if self._info is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存项目", "", "TrackLab 项目 (*.json)"
+        )
+        if not path:
+            return
+        dest = Path(path)
+        if dest.suffix.lower() != ".json":
+            dest = dest.with_suffix(".json")
+        active = self._active_layer()
+        write_track_project(
+            dest,
+            self._info.path,
+            None if active is None else active.result,
+            tracks=self._tracks,
+            active_track_id=self._active_id,
+            model_name=DEFAULT_SPEC.model_id,
+            model_version=DEFAULT_SPEC.version,
+            model_license=DEFAULT_SPEC.license,
+            show_contours=self._show_contours,
+            show_prompts=self._show_prompts,
+            show_calibration=self._show_calibration,
+            calibration=self._calibration,
+        )
+        self.statusBar().showMessage(f"已保存项目 {dest}", 4000)
+
+    def _set_play_icon(self, playing: bool) -> None:
+        self._play_btn.setIcon(pause_icon() if playing else play_icon())
+
+    def _shake_offset(self, frame: int | None = None) -> tuple[float, float]:
+        if self._shake is None:
+            return 0.0, 0.0
+        return self._shake.offset(self._index if frame is None else frame)
+
+    def _video_to_stable(self, x: float, y: float, frame: int | None = None) -> tuple[float, float]:
+        dx, dy = self._shake_offset(frame)
+        return x - dx, y - dy
+
+    def _stable_to_video(self, x: float, y: float, frame: int | None = None) -> tuple[float, float]:
+        dx, dy = self._shake_offset(frame)
+        return x + dx, y + dy
+
+    def _exit_interaction(self) -> None:
+        self._video.set_interaction_mode(MODE_TRACK)
+        self._pending_rulers = None
+        self._axis_undo_pushed = False
+        self._axis_rotate_base = None
+        if self._ruler_btn is not None:
+            self._ruler_btn.setChecked(False)
+        if self._axis_btn is not None:
+            self._axis_btn.setChecked(False)
+        self._sync_cal_overlay()
+
+    def _start_ruler_tool(self, *_args) -> None:
+        if self.sender() is self._ruler_btn and self._ruler_btn is not None:
+            if not self._ruler_btn.isChecked():
+                self._exit_interaction()
+                self._cal_dialog.hide()
+                return
+        if self._info is None:
+            if self._ruler_btn is not None:
+                self._ruler_btn.setChecked(False)
+            return
+        if self._axis_btn is not None:
+            self._axis_btn.setChecked(False)
+        if self._ruler_btn is not None:
+            self._ruler_btn.setChecked(True)
+        self._pending_rulers = []
+        self._video.set_interaction_mode(MODE_RULER)
+        self._cal_dialog.show()
+        self._cal_dialog.raise_()
+        hint = (
+            "拖出标定尺，默认 1.000 m。"
+            if self._cal_dialog.mode() is CalibrationMode.UNIFORM
+            else "先拖出近尺，再拖出远尺。两尺应尽量平行。"
+        )
+        self.statusBar().showMessage(hint + " Esc 取消当前步骤。")
+        self._cal_dialog.set_status(hint)
+        self._sync_cal_overlay()
+
+    def _start_axis_tool(self, *_args) -> None:
+        if self.sender() is self._axis_btn and self._axis_btn is not None:
+            if not self._axis_btn.isChecked():
+                self._exit_interaction()
+                return
+        if self._info is None:
+            if self._axis_btn is not None:
+                self._axis_btn.setChecked(False)
+            return
+        if self._ruler_btn is not None:
+            self._ruler_btn.setChecked(False)
+        if self._axis_btn is not None:
+            self._axis_btn.setChecked(True)
+        self._pending_rulers = None
+        self._cal_dialog.hide()
+        created = self._ensure_default_axes()
+        self._video.set_interaction_mode(MODE_AXIS)
+        self._sync_cal_overlay()
+        if created:
+            self._refresh_track_ui()
+        self.statusBar().showMessage(
+            "拖动原点移动，拖动轴尖弯箭头旋转。按住 Shift 以 90° 对齐。Esc 结束编辑。"
+        )
+
+    def _start_origin_only(self, *_args) -> None:
+        self._start_axis_tool()
+
+    def _start_axis_direction(self, *_args) -> None:
+        self._start_axis_tool()
+
+    def _ensure_default_axes(self) -> bool:
+        if self._info is None:
+            return False
+        self._show_calibration = True
+        self._cal_overlay_action.setChecked(True)
+        self._video.set_show_calibration(True)
+        if self._calibration.frame.origin is not None:
+            return False
+        self._push_undo()
+        cx = self._info.width / 2.0
+        cy = self._info.height / 2.0
+        sx, sy = self._video_to_stable(cx, cy)
+        self._calibration.frame.origin_x = sx
+        self._calibration.frame.origin_y = sy
+        if self._shake is None:
+            self._cal_drawn_before_shake = True
+        return True
+
+    def _on_interaction_cancelled(self) -> None:
+        self._exit_interaction()
+        self._cal_dialog.hide()
+        self.statusBar().showMessage("已取消当前标定步骤", 3000)
+
+    def _on_cal_mode_changed(self, _mode: str) -> None:
+        if self._pending_rulers is not None:
+            self._pending_rulers = []
+        if self._video.interaction_mode() == MODE_RULER:
+            self._start_ruler_tool()
+
+    def _on_cal_lengths(self, near_m: float, far_m: float) -> None:
+        if not self._pending_rulers:
+            return
+        self._pending_rulers[0].length_m = near_m
+        if len(self._pending_rulers) > 1:
+            self._pending_rulers[1].length_m = far_m
+        self._sync_cal_overlay()
+
+    def _on_cal_overlay_toggled(self, checked: bool) -> None:
+        self._show_calibration = checked
+        self._video.set_show_calibration(checked)
+
+    def _redraw_rulers(self) -> None:
+        self._pending_rulers = []
+        self._video.set_interaction_mode(MODE_RULER)
+        if self._ruler_btn is not None:
+            self._ruler_btn.setChecked(True)
+        self._cal_dialog.set_status("重新拖出标定尺。")
+        self._sync_cal_overlay()
+
+    def _swap_pending_rulers(self) -> None:
+        target = self._pending_rulers if self._pending_rulers else self._calibration.rulers
+        if len(target) < 2:
+            self._cal_dialog.set_status("需要两把尺才能交换近/远。", error=True)
+            return
+        if self._pending_rulers:
+            self._pending_rulers[0].role, self._pending_rulers[1].role = (
+                RulerRole.FAR,
+                RulerRole.NEAR,
+            )
+            self._pending_rulers.reverse()
+            near_m, far_m = self._cal_dialog.lengths()
+            self._cal_dialog.set_lengths(far_m, near_m)
+        else:
+            self._push_undo()
+            self._calibration.swap_near_far()
+            self._refresh_track_ui()
+        self._sync_cal_overlay()
+
+    def _on_ruler_drawn(self, x0: float, y0: float, x1: float, y1: float) -> None:
+        ax, ay = self._video_to_stable(x0, y0)
+        bx, by = self._video_to_stable(x1, y1)
+        near_m, far_m = self._cal_dialog.lengths()
+        if self._pending_rulers is None:
+            self._pending_rulers = []
+        if self._cal_dialog.mode() is CalibrationMode.UNIFORM:
+            self._pending_rulers = [
+                RulerSegment(Point2D(ax, ay), Point2D(bx, by), near_m, RulerRole.SINGLE)
+            ]
+            self._cal_dialog.set_status("已画单尺。确认长度后点击应用。")
+            self.statusBar().showMessage("标定尺已画出，在面板中应用或重画。", 4000)
+        elif not self._pending_rulers:
+            self._pending_rulers = [
+                RulerSegment(Point2D(ax, ay), Point2D(bx, by), near_m, RulerRole.NEAR)
+            ]
+            self._cal_dialog.set_status("已画近尺。请再拖出远尺。")
+            self.statusBar().showMessage("近尺已画出，请拖出远尺。", 4000)
+        else:
+            self._pending_rulers = [
+                self._pending_rulers[0],
+                RulerSegment(Point2D(ax, ay), Point2D(bx, by), far_m, RulerRole.FAR),
+            ]
+            self._cal_dialog.set_status("近尺和远尺已就绪。确认后点击应用。")
+            self.statusBar().showMessage("双尺已画出，在面板中应用或重画。", 4000)
+        self._sync_cal_overlay()
+
+    def _apply_pending_calibration(self) -> None:
+        if not self._pending_rulers:
+            self._cal_dialog.set_status("请先画标定尺。", error=True)
+            return
+        near_m, far_m = self._cal_dialog.lengths()
+        rulers = list(self._pending_rulers)
+        rulers[0].length_m = near_m
+        frame = self._calibration.frame
+        if self._cal_dialog.mode() is CalibrationMode.NEAR_FAR:
+            if len(rulers) < 2:
+                self._cal_dialog.set_status("透视模式需要近尺和远尺。", error=True)
+                return
+            rulers[1].length_m = far_m
+            state = near_far_state(
+                rulers[0],
+                rulers[1],
+                origin=frame.origin,
+                axis_angle_deg=frame.axis_angle_deg,
+            )
+        else:
+            state = uniform_state(
+                rulers[0].a,
+                rulers[0].b,
+                length_m=near_m,
+                origin=frame.origin,
+                axis_angle_deg=frame.axis_angle_deg,
+            )
+        ok, message = state.validate()
+        if not ok or state.mode is CalibrationMode.NONE:
+            self._cal_dialog.set_status(state.warning or message, error=True)
+            return
+        state.frame = CoordinateFrame(
+            origin_x=frame.origin_x,
+            origin_y=frame.origin_y,
+            axis_angle_deg=frame.axis_angle_deg,
+            y_up=frame.y_up,
+        )
+        self._push_undo()
+        self._calibration = state
+        self._pending_rulers = None
+        if self._shake is None:
+            self._cal_drawn_before_shake = True
+        self._cal_dialog.set_status("标定已应用。")
+        self._exit_interaction()
+        self._cal_dialog.hide()
+        self._refresh_track_ui()
+        extra = " 超出覆盖区域时将提示外推。" if state.mode is CalibrationMode.NEAR_FAR else ""
+        self.statusBar().showMessage(f"标定已应用，单位切换为 m / m/s。{extra}", 5000)
+
+    def _clear_calibration(self) -> None:
+        self._push_undo()
+        frame = self._calibration.frame
+        self._calibration = CalibrationState(frame=frame)
+        self._pending_rulers = None
+        self._exit_interaction()
+        self._refresh_track_ui()
+        self.statusBar().showMessage("已清除标定尺，单位恢复为 px。", 4000)
+
+    def _on_axis_dragged(self, kind: str, x: float, y: float, shift: bool = False) -> None:
+        if not self._axis_undo_pushed:
+            self._push_undo()
+            self._axis_undo_pushed = True
+            if self._shake is None:
+                self._cal_drawn_before_shake = True
+        sx, sy = self._video_to_stable(x, y)
+        frame = self._calibration.frame
+        if kind == "origin":
+            self._axis_rotate_base = None
+            frame.origin_x = sx
+            frame.origin_y = sy
+            self._video.set_axis_origin((x, y))
+            self._sync_cal_overlay()
+            return
+        origin = frame.origin
+        if origin is None:
+            frame.origin_x = sx
+            frame.origin_y = sy
+            self._sync_cal_overlay()
+            return
+        mouse_ang = axis_pointer_angle(
+            origin.x, origin.y, sx, sy, y_up=frame.y_up
+        )
+        if self._axis_rotate_base is None:
+            self._axis_rotate_base = (frame.axis_angle_deg, mouse_ang)
+        base_axis, base_mouse = self._axis_rotate_base
+        angle = base_axis + (mouse_ang - base_mouse)
+        if shift:
+            angle = snap_axis_angle(angle)
+        frame.axis_angle_deg = angle
+        self._sync_cal_overlay()
+
+    def _on_axis_drag_finished(self) -> None:
+        self._axis_undo_pushed = False
+        self._axis_rotate_base = None
+        origin = self._calibration.frame.origin
+        angle = self._calibration.axis_angle()
+        self._refresh_track_ui()
+        if origin is not None:
+            self.statusBar().showMessage(
+                f"坐标系：原点 ({origin.x:.1f}, {origin.y:.1f})，x 正向 {angle:.1f}°",
+                4000,
+            )
+
+    def _sync_cal_overlay(self) -> None:
+        source = (
+            self._pending_rulers
+            if self._pending_rulers is not None
+            else self._calibration.rulers
+        )
+        rulers: list[tuple[float, float, float, float, str, str]] = []
+        for ruler in source:
+            ax, ay = self._stable_to_video(ruler.a.x, ruler.a.y)
+            bx, by = self._stable_to_video(ruler.b.x, ruler.b.y)
+            role = ""
+            if ruler.role is RulerRole.NEAR:
+                role = "近"
+            elif ruler.role is RulerRole.FAR:
+                role = "远"
+            rulers.append((ax, ay, bx, by, f"{ruler.length_m:.3f} m", role))
+        self._video.set_ruler_overlay(rulers)
+        origin = self._calibration.frame.origin
+        if origin is not None:
+            ov = self._stable_to_video(origin.x, origin.y)
+            unit = self._calibration.position_unit
+            if self._info is not None:
+                length = axis_display_length(self._info.width, self._info.height)
+            else:
+                length = AXIS_MIN_LENGTH
+            ang = self._calibration.axis_angle()
+            x_end, y_end = axis_arm_ends(
+                ov[0],
+                ov[1],
+                length,
+                ang,
+                y_up=self._calibration.frame.y_up,
+            )
+            self._video.set_axis_overlay(ov, x_end, y_end, f"x ({unit})", f"y ({unit})")
+        else:
+            self._video.set_axis_overlay(None, None, None, "", "")
+        self._video.set_show_calibration(self._show_calibration)
+
+    def _restore_window_prefs(self) -> None:
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            return
+        settings = QSettings()
+        geo = settings.value("main/geometry")
+        if isinstance(geo, QByteArray) and not geo.isEmpty():
+            self.restoreGeometry(geo)
+            if not _on_screen(self.frameGeometry()):
+                self.resize(1280, 800)
+                self.move(80, 60)
+        self._workspace.restore_prefs(settings)
+        if getattr(self, "_chart_action", None) is not None:
+            self._chart_action.setChecked(self._workspace.chart_visible)
+        if getattr(self, "_table_action", None) is not None:
+            self._table_action.setChecked(self._workspace.data_visible)
+
+    def _save_window_prefs(self) -> None:
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            return
+        settings = QSettings()
+        settings.setValue("main/geometry", self.saveGeometry())
+        self._workspace.save_prefs(settings)
+
+
+def _fmt_ms(ms: int) -> str:
+    total = max(ms, 0)
+    minutes, rest = divmod(total // 1000, 60)
+    hours, minutes = divmod(minutes, 60)
+    frac = (total % 1000) // 10
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{rest:02d}.{frac:02d}"
+    return f"{minutes:02d}:{rest:02d}.{frac:02d}"

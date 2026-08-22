@@ -1,0 +1,539 @@
+{
+  "clip_id": "track_projectile_normal",
+  "schema_version": "1.0.0",
+  "task": "track",
+  "scene": "projectile",
+  "difficulty": "normal",
+  "width": 320,
+  "height": 180,
+  "fps": 30.0,
+  "frame_count": 50,
+  "track": [
+    {
+      "frame": 0,
+      "center": {
+        "x": 20.0,
+        "y": 140.0
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 1,
+      "center": {
+        "x": 22.666666666666668,
+        "y": 136.1
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 2,
+      "center": {
+        "x": 25.333333333333332,
+        "y": 132.4
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 3,
+      "center": {
+        "x": 28.0,
+        "y": 128.9
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 4,
+      "center": {
+        "x": 30.666666666666664,
+        "y": 125.6
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 5,
+      "center": {
+        "x": 33.33333333333333,
+        "y": 122.5
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 6,
+      "center": {
+        "x": 36.0,
+        "y": 119.6
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 7,
+      "center": {
+        "x": 38.66666666666667,
+        "y": 116.9
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 8,
+      "center": {
+        "x": 41.33333333333333,
+        "y": 114.4
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 9,
+      "center": {
+        "x": 44.0,
+        "y": 112.1
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 10,
+      "center": {
+        "x": 46.666666666666664,
+        "y": 110.0
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 11,
+      "center": {
+        "x": 49.33333333333333,
+        "y": 108.1
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 12,
+      "center": {
+        "x": 52.0,
+        "y": 106.4
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 13,
+      "center": {
+        "x": 54.66666666666667,
+        "y": 104.9
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 14,
+      "center": {
+        "x": 57.333333333333336,
+        "y": 103.6
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 15,
+      "center": {
+        "x": 60.0,
+        "y": 102.5
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 16,
+      "center": {
+        "x": 62.666666666666664,
+        "y": 101.6
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 17,
+      "center": {
+        "x": 65.33333333333333,
+        "y": 100.9
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 18,
+      "center": {
+        "x": 68.0,
+        "y": 100.4
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 19,
+      "center": {
+        "x": 70.66666666666666,
+        "y": 100.1
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 20,
+      "center": {
+        "x": 73.33333333333333,
+        "y": 100.0
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 21,
+      "center": {
+        "x": 76.0,
+        "y": 100.1
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 22,
+      "center": {
+        "x": 78.66666666666666,
+        "y": 100.4
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 23,
+      "center": {
+        "x": 81.33333333333334,
+        "y": 100.9
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 24,
+      "center": {
+        "x": 84.0,
+        "y": 101.6
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 25,
+      "center": {
+        "x": 86.66666666666667,
+        "y": 102.5
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 26,
+      "center": {
+        "x": 89.33333333333334,
+        "y": 103.60000000000001
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 27,
+      "center": {
+        "x": 92.0,
+        "y": 104.9
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 28,
+      "center": {
+        "x": 94.66666666666667,
+        "y": 106.4
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 29,
+      "center": {
+        "x": 97.33333333333333,
+        "y": 108.1
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 30,
+      "center": {
+        "x": 100.0,
+        "y": 110.0
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 31,
+      "center": {
+        "x": 102.66666666666667,
+        "y": 112.10000000000001
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 32,
+      "center": {
+        "x": 105.33333333333333,
+        "y": 114.4
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 33,
+      "center": {
+        "x": 108.0,
+        "y": 116.90000000000002
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 34,
+      "center": {
+        "x": 110.66666666666666,
+        "y": 119.6
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 35,
+      "center": {
+        "x": 113.33333333333334,
+        "y": 122.50000000000001
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 36,
+      "center": {
+        "x": 116.0,
+        "y": 125.6
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 37,
+      "center": {
+        "x": 118.66666666666667,
+        "y": 128.9
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 38,
+      "center": {
+        "x": 121.33333333333333,
+        "y": 132.4
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 39,
+      "center": {
+        "x": 124.0,
+        "y": 136.1
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 40,
+      "center": {
+        "x": 126.66666666666666,
+        "y": 140.0
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 41,
+      "center": {
+        "x": 129.33333333333334,
+        "y": 144.1
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 42,
+      "center": {
+        "x": 132.0,
+        "y": 148.39999999999998
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 43,
+      "center": {
+        "x": 134.66666666666669,
+        "y": 152.9
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 44,
+      "center": {
+        "x": 137.33333333333331,
+        "y": 157.6
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 45,
+      "center": {
+        "x": 140.0,
+        "y": 162.5
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 46,
+      "center": {
+        "x": 142.66666666666669,
+        "y": 167.60000000000002
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 47,
+      "center": {
+        "x": 145.33333333333331,
+        "y": 172.9
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 48,
+      "center": {
+        "x": 148.0,
+        "y": 178.4
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 49,
+      "center": {
+        "x": 150.66666666666666,
+        "y": 184.1
+      },
+      "visible": false,
+      "bbox": null,
+      "occluded": false
+    }
+  ],
+  "pose": [],
+  "calibration": {
+    "ruler_a": {
+      "x": 10,
+      "y": 160
+    },
+    "ruler_b": {
+      "x": 60,
+      "y": 160
+    },
+    "length_m": 0.5,
+    "origin": {
+      "x": 20,
+      "y": 140
+    },
+    "axis_angle_deg": 0.0,
+    "has_reliable_ruler": true
+  },
+  "physics": {
+    "period_s": null,
+    "gravity_ms2": 9.81,
+    "velocity_ms": null,
+    "acceleration_ms2": null,
+    "trajectory_fit_error": 0.0
+  },
+  "notes": ""
+}

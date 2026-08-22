@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.DS_Store
+.idea/
+.vscode/
+*.orig
+.pytest_cache/
+tests/ai/results/
+.cache/
+models/
+*.pt
+*.mp4
+!tests/ai/fixtures/*.mp4

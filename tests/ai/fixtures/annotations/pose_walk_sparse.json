@@ -1,0 +1,665 @@
+{
+  "clip_id": "pose_walk_sparse",
+  "schema_version": "1.0.0",
+  "task": "pose",
+  "scene": "mixed",
+  "difficulty": "normal",
+  "width": 320,
+  "height": 180,
+  "fps": 30.0,
+  "frame_count": 30,
+  "track": [],
+  "pose": [
+    {
+      "frame": 0,
+      "keypoints": [
+        {
+          "name": "nose",
+          "x": 80.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "left_eye",
+          "x": 76.0,
+          "y": 48.0,
+          "visible": true
+        },
+        {
+          "name": "right_eye",
+          "x": 84.0,
+          "y": 48.0,
+          "visible": true
+        },
+        {
+          "name": "left_ear",
+          "x": 72.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "right_ear",
+          "x": 88.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "left_shoulder",
+          "x": 62.0,
+          "y": 70.0,
+          "visible": true
+        },
+        {
+          "name": "right_shoulder",
+          "x": 98.0,
+          "y": 70.0,
+          "visible": true
+        },
+        {
+          "name": "left_elbow",
+          "x": 52.0,
+          "y": 90.0,
+          "visible": true
+        },
+        {
+          "name": "right_elbow",
+          "x": 108.0,
+          "y": 90.0,
+          "visible": true
+        },
+        {
+          "name": "left_wrist",
+          "x": 46.0,
+          "y": 108.0,
+          "visible": true
+        },
+        {
+          "name": "right_wrist",
+          "x": 114.0,
+          "y": 108.0,
+          "visible": true
+        },
+        {
+          "name": "left_hip",
+          "x": 68.0,
+          "y": 110.0,
+          "visible": true
+        },
+        {
+          "name": "right_hip",
+          "x": 92.0,
+          "y": 110.0,
+          "visible": true
+        },
+        {
+          "name": "left_knee",
+          "x": 66.0,
+          "y": 140.0,
+          "visible": true
+        },
+        {
+          "name": "right_knee",
+          "x": 94.0,
+          "y": 140.0,
+          "visible": true
+        },
+        {
+          "name": "left_ankle",
+          "x": 64.0,
+          "y": 170.0,
+          "visible": true
+        },
+        {
+          "name": "right_ankle",
+          "x": 96.0,
+          "y": 170.0,
+          "visible": true
+        }
+      ],
+      "person_id": 0
+    },
+    {
+      "frame": 5,
+      "keypoints": [
+        {
+          "name": "nose",
+          "x": 95.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "left_eye",
+          "x": 91.0,
+          "y": 48.0,
+          "visible": true
+        },
+        {
+          "name": "right_eye",
+          "x": 99.0,
+          "y": 48.0,
+          "visible": true
+        },
+        {
+          "name": "left_ear",
+          "x": 87.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "right_ear",
+          "x": 103.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "left_shoulder",
+          "x": 77.0,
+          "y": 70.0,
+          "visible": true
+        },
+        {
+          "name": "right_shoulder",
+          "x": 113.0,
+          "y": 70.0,
+          "visible": true
+        },
+        {
+          "name": "left_elbow",
+          "x": 67.0,
+          "y": 90.0,
+          "visible": true
+        },
+        {
+          "name": "right_elbow",
+          "x": 123.0,
+          "y": 90.0,
+          "visible": true
+        },
+        {
+          "name": "left_wrist",
+          "x": 61.0,
+          "y": 108.0,
+          "visible": true
+        },
+        {
+          "name": "right_wrist",
+          "x": 129.0,
+          "y": 108.0,
+          "visible": true
+        },
+        {
+          "name": "left_hip",
+          "x": 83.0,
+          "y": 110.0,
+          "visible": true
+        },
+        {
+          "name": "right_hip",
+          "x": 107.0,
+          "y": 110.0,
+          "visible": true
+        },
+        {
+          "name": "left_knee",
+          "x": 81.0,
+          "y": 140.0,
+          "visible": true
+        },
+        {
+          "name": "right_knee",
+          "x": 109.0,
+          "y": 140.0,
+          "visible": true
+        },
+        {
+          "name": "left_ankle",
+          "x": 79.0,
+          "y": 170.0,
+          "visible": true
+        },
+        {
+          "name": "right_ankle",
+          "x": 111.0,
+          "y": 170.0,
+          "visible": true
+        }
+      ],
+      "person_id": 0
+    },
+    {
+      "frame": 10,
+      "keypoints": [
+        {
+          "name": "nose",
+          "x": 110.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "left_eye",
+          "x": 106.0,
+          "y": 48.0,
+          "visible": true
+        },
+        {
+          "name": "right_eye",
+          "x": 114.0,
+          "y": 48.0,
+          "visible": true
+        },
+        {
+          "name": "left_ear",
+          "x": 102.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "right_ear",
+          "x": 118.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "left_shoulder",
+          "x": 92.0,
+          "y": 70.0,
+          "visible": true
+        },
+        {
+          "name": "right_shoulder",
+          "x": 128.0,
+          "y": 70.0,
+          "visible": true
+        },
+        {
+          "name": "left_elbow",
+          "x": 82.0,
+          "y": 90.0,
+          "visible": true
+        },
+        {
+          "name": "right_elbow",
+          "x": 138.0,
+          "y": 90.0,
+          "visible": true
+        },
+        {
+          "name": "left_wrist",
+          "x": 76.0,
+          "y": 108.0,
+          "visible": true
+        },
+        {
+          "name": "right_wrist",
+          "x": 144.0,
+          "y": 108.0,
+          "visible": true
+        },
+        {
+          "name": "left_hip",
+          "x": 98.0,
+          "y": 110.0,
+          "visible": true
+        },
+        {
+          "name": "right_hip",
+          "x": 122.0,
+          "y": 110.0,
+          "visible": true
+        },
+        {
+          "name": "left_knee",
+          "x": 96.0,
+          "y": 140.0,
+          "visible": true
+        },
+        {
+          "name": "right_knee",
+          "x": 124.0,
+          "y": 140.0,
+          "visible": true
+        },
+        {
+          "name": "left_ankle",
+          "x": 94.0,
+          "y": 170.0,
+          "visible": true
+        },
+        {
+          "name": "right_ankle",
+          "x": 126.0,
+          "y": 170.0,
+          "visible": true
+        }
+      ],
+      "person_id": 0
+    },
+    {
+      "frame": 15,
+      "keypoints": [
+        {
+          "name": "nose",
+          "x": 125.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "left_eye",
+          "x": 121.0,
+          "y": 48.0,
+          "visible": true
+        },
+        {
+          "name": "right_eye",
+          "x": 129.0,
+          "y": 48.0,
+          "visible": true
+        },
+        {
+          "name": "left_ear",
+          "x": 117.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "right_ear",
+          "x": 133.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "left_shoulder",
+          "x": 107.0,
+          "y": 70.0,
+          "visible": true
+        },
+        {
+          "name": "right_shoulder",
+          "x": 143.0,
+          "y": 70.0,
+          "visible": true
+        },
+        {
+          "name": "left_elbow",
+          "x": 97.0,
+          "y": 90.0,
+          "visible": true
+        },
+        {
+          "name": "right_elbow",
+          "x": 153.0,
+          "y": 90.0,
+          "visible": true
+        },
+        {
+          "name": "left_wrist",
+          "x": 91.0,
+          "y": 108.0,
+          "visible": true
+        },
+        {
+          "name": "right_wrist",
+          "x": 159.0,
+          "y": 108.0,
+          "visible": true
+        },
+        {
+          "name": "left_hip",
+          "x": 113.0,
+          "y": 110.0,
+          "visible": true
+        },
+        {
+          "name": "right_hip",
+          "x": 137.0,
+          "y": 110.0,
+          "visible": true
+        },
+        {
+          "name": "left_knee",
+          "x": 111.0,
+          "y": 140.0,
+          "visible": true
+        },
+        {
+          "name": "right_knee",
+          "x": 139.0,
+          "y": 140.0,
+          "visible": true
+        },
+        {
+          "name": "left_ankle",
+          "x": 109.0,
+          "y": 170.0,
+          "visible": true
+        },
+        {
+          "name": "right_ankle",
+          "x": 141.0,
+          "y": 170.0,
+          "visible": true
+        }
+      ],
+      "person_id": 0
+    },
+    {
+      "frame": 20,
+      "keypoints": [
+        {
+          "name": "nose",
+          "x": 140.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "left_eye",
+          "x": 136.0,
+          "y": 48.0,
+          "visible": true
+        },
+        {
+          "name": "right_eye",
+          "x": 144.0,
+          "y": 48.0,
+          "visible": true
+        },
+        {
+          "name": "left_ear",
+          "x": 132.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "right_ear",
+          "x": 148.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "left_shoulder",
+          "x": 122.0,
+          "y": 70.0,
+          "visible": true
+        },
+        {
+          "name": "right_shoulder",
+          "x": 158.0,
+          "y": 70.0,
+          "visible": true
+        },
+        {
+          "name": "left_elbow",
+          "x": 112.0,
+          "y": 90.0,
+          "visible": true
+        },
+        {
+          "name": "right_elbow",
+          "x": 168.0,
+          "y": 90.0,
+          "visible": true
+        },
+        {
+          "name": "left_wrist",
+          "x": 106.0,
+          "y": 108.0,
+          "visible": true
+        },
+        {
+          "name": "right_wrist",
+          "x": 174.0,
+          "y": 108.0,
+          "visible": true
+        },
+        {
+          "name": "left_hip",
+          "x": 128.0,
+          "y": 110.0,
+          "visible": true
+        },
+        {
+          "name": "right_hip",
+          "x": 152.0,
+          "y": 110.0,
+          "visible": true
+        },
+        {
+          "name": "left_knee",
+          "x": 126.0,
+          "y": 140.0,
+          "visible": true
+        },
+        {
+          "name": "right_knee",
+          "x": 154.0,
+          "y": 140.0,
+          "visible": true
+        },
+        {
+          "name": "left_ankle",
+          "x": 124.0,
+          "y": 170.0,
+          "visible": true
+        },
+        {
+          "name": "right_ankle",
+          "x": 156.0,
+          "y": 170.0,
+          "visible": true
+        }
+      ],
+      "person_id": 0
+    },
+    {
+      "frame": 25,
+      "keypoints": [
+        {
+          "name": "nose",
+          "x": 155.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "left_eye",
+          "x": 151.0,
+          "y": 48.0,
+          "visible": true
+        },
+        {
+          "name": "right_eye",
+          "x": 159.0,
+          "y": 48.0,
+          "visible": true
+        },
+        {
+          "name": "left_ear",
+          "x": 147.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "right_ear",
+          "x": 163.0,
+          "y": 50.0,
+          "visible": true
+        },
+        {
+          "name": "left_shoulder",
+          "x": 137.0,
+          "y": 70.0,
+          "visible": true
+        },
+        {
+          "name": "right_shoulder",
+          "x": 173.0,
+          "y": 70.0,
+          "visible": true
+        },
+        {
+          "name": "left_elbow",
+          "x": 127.0,
+          "y": 90.0,
+          "visible": true
+        },
+        {
+          "name": "right_elbow",
+          "x": 183.0,
+          "y": 90.0,
+          "visible": true
+        },
+        {
+          "name": "left_wrist",
+          "x": 121.0,
+          "y": 108.0,
+          "visible": true
+        },
+        {
+          "name": "right_wrist",
+          "x": 189.0,
+          "y": 108.0,
+          "visible": true
+        },
+        {
+          "name": "left_hip",
+          "x": 143.0,
+          "y": 110.0,
+          "visible": true
+        },
+        {
+          "name": "right_hip",
+          "x": 167.0,
+          "y": 110.0,
+          "visible": true
+        },
+        {
+          "name": "left_knee",
+          "x": 141.0,
+          "y": 140.0,
+          "visible": true
+        },
+        {
+          "name": "right_knee",
+          "x": 169.0,
+          "y": 140.0,
+          "visible": true
+        },
+        {
+          "name": "left_ankle",
+          "x": 139.0,
+          "y": 170.0,
+          "visible": true
+        },
+        {
+          "name": "right_ankle",
+          "x": 171.0,
+          "y": 170.0,
+          "visible": true
+        }
+      ],
+      "person_id": 0
+    }
+  ],
+  "calibration": null,
+  "physics": null,
+  "notes": "pose labelled every 5 frames"
+}

@@ -1,0 +1,3157 @@
+{
+  "created_at": 1787371780.274372,
+  "machine": {
+    "platform": "macOS-15.7.5-arm64-arm-64bit",
+    "python": "3.11.7",
+    "processor": "arm",
+    "av": "18.1.0",
+    "numpy": "2.4.6",
+    "PySide6": "6.11.2"
+  },
+  "model_bundle": "oracle",
+  "split": "all",
+  "seed": 0,
+  "pass_rate": 1.0,
+  "clips": [
+    {
+      "clip_id": "track_ball_normal",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.712498487904668e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_hard",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "ci",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.2459000572562218e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_pendulum_normal",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.5249999705702066e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_slider_normal",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.066701952368021e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_projectile_normal",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.3125012628734112e-05,
+      "error": null
+    },
+    {
+      "clip_id": "calib_reliable",
+      "task": "calibration",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.0,
+          "threshold": 0.01,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.2909877113997936e-06,
+      "error": null
+    },
+    {
+      "clip_id": "calib_no_ruler",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "ci",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "rejection_when_no_ruler",
+          "value": 1.0,
+          "threshold": 1.0,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 8.749775588512421e-07,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_normal",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 3.8458936296031855e-16,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.00012120901374146342,
+      "error": null
+    },
+    {
+      "clip_id": "pose_jump_hard",
+      "task": "pose",
+      "difficulty": "hard",
+      "split": "ci",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.85,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 2.8798537313888633e-16,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 5.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.00011316698510199785,
+      "error": null
+    },
+    {
+      "clip_id": "physics_pendulum",
+      "task": "physics",
+      "difficulty": "normal",
+      "split": "ci",
+      "model": "oracle_tracker+physics",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "period_relative_error",
+          "value": 1.8503717077085943e-16,
+          "threshold": 0.02,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "gravity_relative_error",
+          "value": 3.621522608359328e-16,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "velocity_relative_error",
+          "value": null,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "acceleration_relative_error",
+          "value": null,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.5625031664967537e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_turntable_normal",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.3666984159499407e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_blur_hard",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.1665979400277138e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_pendulum_shake_hard",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.2500036973506212e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_15fps_hard",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 8.459028322249651e-06,
+      "error": null
+    },
+    {
+      "clip_id": "calib_oblique_hard",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.0,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.458043698221445e-06,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_sparse",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 6.922532749304991e-17,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.00010995898628607392,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_normal_slot11",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.183303538709879e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_hard_slot12",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.2083037290722132e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_pendulum_normal_slot13",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.5042023733258247e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_slider_normal_slot14",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.0334013495594263e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_projectile_normal_slot15",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.2708012945950031e-05,
+      "error": null
+    },
+    {
+      "clip_id": "physics_pendulum_slot16",
+      "task": "physics",
+      "difficulty": "normal",
+      "split": "holdout",
+      "model": "oracle_tracker+physics",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "period_relative_error",
+          "value": 1.8503717077085943e-16,
+          "threshold": 0.02,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "gravity_relative_error",
+          "value": 3.621522608359328e-16,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "velocity_relative_error",
+          "value": null,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "acceleration_relative_error",
+          "value": null,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.491600414738059e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_turntable_normal_slot17",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.2375006917864084e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_blur_hard_slot18",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.0249961633235216e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_pendulum_shake_hard_slot19",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.208402682095766e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_15fps_hard_slot20",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 8.124974556267262e-06,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_normal_slot21",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.1583964806050062e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_hard_slot22",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.1958007235080004e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_pendulum_normal_slot23",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.49579718708992e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_slider_normal_slot24",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.029099803417921e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_projectile_normal_slot25",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.2666976545006037e-05,
+      "error": null
+    },
+    {
+      "clip_id": "physics_pendulum_slot26",
+      "task": "physics",
+      "difficulty": "normal",
+      "split": "holdout",
+      "model": "oracle_tracker+physics",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "period_relative_error",
+          "value": 1.8503717077085943e-16,
+          "threshold": 0.02,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "gravity_relative_error",
+          "value": 3.621522608359328e-16,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "velocity_relative_error",
+          "value": null,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "acceleration_relative_error",
+          "value": null,
+          "threshold": 0.05,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.5166995581239462e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_turntable_normal_slot27",
+      "task": "track",
+      "difficulty": "normal",
+      "split": "holdout",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.98,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.2041011359542608e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_blur_hard_slot28",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "holdout",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.0416959412395954e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_pendulum_shake_hard_slot29",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "holdout",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.233298098668456e-05,
+      "error": null
+    },
+    {
+      "clip_id": "track_ball_15fps_hard_slot30",
+      "task": "track",
+      "difficulty": "hard",
+      "split": "holdout",
+      "model": "oracle_tracker",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "center_median_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "success_at_10px",
+          "value": 1.0,
+          "threshold": 0.8,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "trajectory_completeness",
+          "value": 1.0,
+          "threshold": 0.9,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "drift_tail_mean_px",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "identity_swaps",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 7.790978997945786e-06,
+      "error": null
+    },
+    {
+      "clip_id": "calib_reliable_slot31",
+      "task": "calibration",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.0,
+          "threshold": 0.01,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.2919772416353226e-06,
+      "error": null
+    },
+    {
+      "clip_id": "calib_no_ruler_slot32",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "rejection_when_no_ruler",
+          "value": 1.0,
+          "threshold": 1.0,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 7.08969309926033e-07,
+      "error": null
+    },
+    {
+      "clip_id": "calib_oblique_hard_slot33",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.0,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.541979145258665e-06,
+      "error": null
+    },
+    {
+      "clip_id": "calib_reliable_slot34",
+      "task": "calibration",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.0,
+          "threshold": 0.01,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.541979145258665e-06,
+      "error": null
+    },
+    {
+      "clip_id": "calib_no_ruler_slot35",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "rejection_when_no_ruler",
+          "value": 1.0,
+          "threshold": 1.0,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 7.919734343886375e-07,
+      "error": null
+    },
+    {
+      "clip_id": "calib_oblique_hard_slot36",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.0,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 1.4170072972774506e-06,
+      "error": null
+    },
+    {
+      "clip_id": "calib_reliable_slot37",
+      "task": "calibration",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.0,
+          "threshold": 0.01,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 7.080379873514175e-07,
+      "error": null
+    },
+    {
+      "clip_id": "calib_no_ruler_slot38",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "rejection_when_no_ruler",
+          "value": 1.0,
+          "threshold": 1.0,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 5.00003807246685e-07,
+      "error": null
+    },
+    {
+      "clip_id": "calib_oblique_hard_slot39",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.0,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 6.249756552278996e-07,
+      "error": null
+    },
+    {
+      "clip_id": "calib_reliable_slot40",
+      "task": "calibration",
+      "difficulty": "normal",
+      "split": "holdout",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.0,
+          "threshold": 0.01,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.0,
+          "threshold": 1.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 4.5902561396360397e-07,
+      "error": null
+    },
+    {
+      "clip_id": "calib_no_ruler_slot41",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "holdout",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "rejection_when_no_ruler",
+          "value": 1.0,
+          "threshold": 1.0,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 4.169996827840805e-07,
+      "error": null
+    },
+    {
+      "clip_id": "calib_oblique_hard_slot42",
+      "task": "calibration",
+      "difficulty": "hard",
+      "split": "holdout",
+      "model": "oracle_calibrator",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "scale_relative_error",
+          "value": 0.0,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "axis_angle_error_deg",
+          "value": 0.0,
+          "threshold": 3.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "origin_error_px",
+          "value": 0.0,
+          "threshold": 8.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 5.00003807246685e-07,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_normal_slot43",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 3.8458936296031855e-16,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.00011449999874457717,
+      "error": null
+    },
+    {
+      "clip_id": "pose_jump_hard_slot44",
+      "task": "pose",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.85,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 2.8798537313888633e-16,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 5.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0001134999911300838,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_sparse_slot45",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 6.922532749304991e-17,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 2.3333996068686247e-05,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_normal_slot46",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 3.8458936296031855e-16,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.00011350004933774471,
+      "error": null
+    },
+    {
+      "clip_id": "pose_jump_hard_slot47",
+      "task": "pose",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.85,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 2.8798537313888633e-16,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 5.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.00014262500917539,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_sparse_slot48",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 6.922532749304991e-17,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 3.033294342458248e-05,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_normal_slot49",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 3.8458936296031855e-16,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.00013158400543034077,
+      "error": null
+    },
+    {
+      "clip_id": "pose_jump_hard_slot50",
+      "task": "pose",
+      "difficulty": "hard",
+      "split": "dev",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.85,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 2.8798537313888633e-16,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 5.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.00012629199773073196,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_sparse_slot51",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "dev",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 6.922532749304991e-17,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 2.354104071855545e-05,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_normal_slot52",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "holdout",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 3.8458936296031855e-16,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.0001461249776184559,
+      "error": null
+    },
+    {
+      "clip_id": "pose_jump_hard_slot53",
+      "task": "pose",
+      "difficulty": "hard",
+      "split": "holdout",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.85,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 2.8798537313888633e-16,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 5.0,
+          "threshold": 10.0,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 0.00011312501737847924,
+      "error": null
+    },
+    {
+      "clip_id": "pose_walk_sparse_slot54",
+      "task": "pose",
+      "difficulty": "normal",
+      "split": "holdout",
+      "model": "oracle_pose",
+      "passed": true,
+      "metrics": [
+        {
+          "name": "pck_at_0_05",
+          "value": 1.0,
+          "threshold": 0.95,
+          "higher_is_better": true,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "keypoint_miss_rate",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "static_jitter_px",
+          "value": null,
+          "threshold": 2.0,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        },
+        {
+          "name": "bone_length_cv",
+          "value": 6.922532749304991e-17,
+          "threshold": 0.03,
+          "higher_is_better": false,
+          "passed": true,
+          "details": {}
+        },
+        {
+          "name": "occlusion_recovery_frames",
+          "value": 0.0,
+          "threshold": null,
+          "higher_is_better": false,
+          "passed": null,
+          "details": {}
+        }
+      ],
+      "elapsed_s": 2.3291970137506723e-05,
+      "error": null
+    }
+  ],
+  "regression": {
+    "status": "no_baseline",
+    "blocking": false
+  }
+}
