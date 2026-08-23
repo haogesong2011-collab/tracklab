@@ -106,7 +106,7 @@ QMenu::item:disabled { color: #707070; }
     border-radius: 3px;
     padding: 1px 6px;
     min-height: 20px;
-    max-width: 108px;
+    max-width: 150px;
     font-size: 11px;
     selection-background-color: #5a5a5a;
 }
@@ -123,6 +123,21 @@ QMenu::item:disabled { color: #707070; }
     color: #dedede;
     border: 1px solid #494949;
     selection-background-color: #505050;
+}
+#chartStep, #chartFit {
+    background: #2d2d2d;
+    color: #d6d6d6;
+    border: 1px solid #454545;
+    border-radius: 3px;
+    padding: 1px 4px;
+    min-height: 20px;
+    font-size: 11px;
+}
+#chartStep { max-width: 64px; }
+#chartFit { max-width: 80px; }
+#chartFitLabel {
+    color: #b8b8b8;
+    font-size: 11px;
 }
 #videoView, #videoStage { background: #1f1f1f; border: none; }
 #toolDivider { background: #4a4a4a; }
@@ -365,7 +380,6 @@ QSlider#timeline::handle:horizontal {
 }
 #trackProgress::chunk { background: #6cb6ff; }
 QSplitter::handle { background: #333333; }
-
 QStatusBar {
     background: #1a1a1a;
     border-top: 1px solid #303030;
@@ -406,4 +420,169 @@ QDockWidget::close-button:hover, QDockWidget::float-button:hover {
     border-radius: 3px;
     padding: 3px 6px;
     min-height: 22px;
+}
+#assistantWindow, #assistantPanel, #assistantChatColumn, #assistantContext, #assistantChatHost {
+    background: #191815;
+    color: #f0ece4;
+}
+#assistantHeaderWrap {
+    background: #191815;
+}
+#assistantHeader {
+    background: #191815;
+    border-bottom: 1px solid #2e2c28;
+}
+#assistantNotice {
+    color: #d4c4a8;
+    font-size: 12px;
+    padding: 0 16px 10px 16px;
+    background: #191815;
+}
+#assistantChip {
+    background: transparent;
+    color: #b7b1a6;
+    border: 1px solid #3a3834;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 12px;
+}
+#assistantChip[tone="ok"] { color: #b7c4a4; border-color: #3d4338; }
+#assistantChip[tone="warn"] { color: #d4b27a; border-color: #4a3f2c; }
+#assistantChip[tone="bad"] { color: #c98978; border-color: #4a3530; }
+#assistantChatTitle {
+    background: #191815;
+    border-bottom: 1px solid #2e2c28;
+}
+#assistantChatHeading {
+    color: #f0ece4;
+    font-size: 14px;
+    font-weight: 600;
+}
+#assistantContextScroll {
+    background: #161512;
+    border-right: 1px solid #2e2c28;
+}
+#assistantReady, #assistantStale, #assistantCal, #assistantHint {
+    color: #b7b1a6;
+    font-size: 12px;
+}
+#assistantStale { color: #d4b27a; }
+#assistantCard {
+    background: #1f1d19;
+    color: #f0ece4;
+    border: 1px solid #322f2a;
+    border-radius: 10px;
+    margin-top: 6px;
+    padding-top: 10px;
+}
+#assistantCard::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px;
+    color: #d4c4a8;
+}
+#assistantCandidates, #assistantMeasures, #assistantReport {
+    background: #191815;
+    color: #f0ece4;
+    border: 1px solid #322f2a;
+    border-radius: 8px;
+    padding: 8px;
+    selection-background-color: #3f3c36;
+    selection-color: #f0ece4;
+}
+#assistantChat {
+    background: #191815;
+    border: none;
+    padding: 0;
+}
+#assistantChatHost {
+    background: #191815;
+}
+#assistantMessage {
+    background: transparent;
+}
+#assistantRole {
+    color: #9a958c;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+#assistantThinking {
+    background: transparent;
+}
+#assistantThinkingToggle {
+    background: transparent;
+    border: none;
+    color: #9a958c;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0;
+}
+#assistantThinkingToggle:hover { color: #d4c4a8; }
+#assistantThinkingToggle:checked { color: #c8c2b6; }
+#assistantThinkingBody {
+    background: transparent;
+    color: #8a857c;
+    border: none;
+    border-left: 1px solid #3a3834;
+    padding: 0 0 0 10px;
+    font-size: 13px;
+    selection-background-color: #3f3c36;
+    selection-color: #d4c4a8;
+}
+#assistantMessageBody {
+    background: transparent;
+    color: #f0ece4;
+    border: none;
+    padding: 0;
+    font-size: 15px;
+    selection-background-color: #3f3c36;
+    selection-color: #f0ece4;
+}
+#assistantComposer {
+    background: #191815;
+    border-top: 1px solid #2e2c28;
+}
+#assistantInput {
+    background: #23211c;
+    color: #f0ece4;
+    border: 1px solid #3a3834;
+    border-radius: 14px;
+    padding: 10px 12px;
+    min-height: 72px;
+}
+#assistantInput:focus { border-color: #8a8174; }
+#assistantPanel QPushButton {
+    background: #2a2722;
+    color: #f0ece4;
+    border: 1px solid #3a3834;
+    border-radius: 8px;
+    padding: 5px 12px;
+    min-height: 28px;
+}
+#assistantPanel QPushButton:hover { background: #35322c; }
+#assistantPanel QPushButton:disabled { color: #7a756c; }
+#assistantPrimaryButton {
+    background: #2a2722;
+    color: #f0ece4;
+    border: 1px solid #8a8174;
+    font-weight: 600;
+}
+#assistantPrimaryButton:hover { background: #3a3731; }
+#assistantPrimaryButton:disabled {
+    background: #2a2722;
+    color: #7a756c;
+    border-color: #3a3834;
+}
+#assistantLevel, #assistantPanel QComboBox, #assistantPanel QDoubleSpinBox, #assistantPanel QLineEdit {
+    background: #23211c;
+    color: #f0ece4;
+    border: 1px solid #3a3834;
+    border-radius: 6px;
+    padding: 3px 8px;
+    min-height: 24px;
+}
+#assistantSplitter::handle {
+    background: #2e2c28;
+    width: 6px;
 }

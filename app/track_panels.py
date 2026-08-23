@@ -181,8 +181,6 @@ class TrackDataPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("trackDataPanel")
         self.setMinimumHeight(140)
-        title = QLabel("数据表")
-        title.setObjectName("panelTitle")
         self._table = QTableWidget(0, 8)
         self._table.setObjectName("trackTable")
         self._position_unit = "px"
@@ -191,12 +189,17 @@ class TrackDataPanel(QWidget):
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._table.setWordWrap(False)
+        self._table.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        header = self._table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setMinimumSectionSize(40)
+        header.setStretchLastSection(False)
         self._table.cellClicked.connect(self._on_cell)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 6, 10, 8)
-        layout.setSpacing(6)
-        layout.addWidget(title)
+        layout.setContentsMargins(8, 4, 8, 8)
+        layout.setSpacing(4)
         layout.addWidget(self._table)
 
     def _header_labels(self) -> list[str]:
@@ -262,6 +265,10 @@ class TrackDataPanel(QWidget):
                     item.setForeground(warn)
                     item.setToolTip(f"低可信度：{sample.confidence:.2f}")
                 self._table.setItem(row, col, item)
+        self._table.resizeColumnsToContents()
+        for col in range(self._table.columnCount()):
+            width = self._table.columnWidth(col)
+            self._table.setColumnWidth(col, min(max(width + 8, 48), 128))
 
     def highlight_frame(self, frame: int) -> None:
         for row in range(self._table.rowCount()):

@@ -83,8 +83,8 @@ class CoordinateFrame:
     origin_x: float | None = None
     origin_y: float | None = None
     axis_angle_deg: float = 0.0
-    # Video-analysis default: +x right, +y down (free-fall / projectile vy > 0).
-    y_up: bool = False
+    # Tracker convention: +x right, +y up. Falling motion therefore has vy < 0.
+    y_up: bool = True
 
     @property
     def origin(self) -> Point2D | None:
@@ -102,7 +102,7 @@ class CoordinateFrame:
             origin_x=None if raw.get("origin_x") is None else float(raw["origin_x"]),
             origin_y=None if raw.get("origin_y") is None else float(raw["origin_y"]),
             axis_angle_deg=float(raw.get("axis_angle_deg", 0.0)),
-            y_up=bool(raw["y_up"]) if "y_up" in raw else False,
+            y_up=bool(raw["y_up"]) if "y_up" in raw else True,
         )
 
 
@@ -237,10 +237,12 @@ class CalibrationState:
         return extra
 
     def pixel_to_world(self, x: float, y: float) -> Point2D:
-        # A ruler without an origin only changes units. Do not invent a
-        # top-left origin or flip y — that made every falling vy negative.
+        # Tracker default: +x right, +y up. Image y is flipped whenever y_up
+        # is set, including a ruler-only scale that has no placed origin.
         if not self.uses_placed_origin():
             dx_m, dy_m = self._image_delta_m(0.0, 0.0, x, y)
+            if self.frame.y_up:
+                dy_m = -dy_m
             return Point2D(dx_m, dy_m)
         origin = self.origin_point()
         dx_m, dy_m = self._image_delta_m(origin.x, origin.y, x, y)
@@ -251,7 +253,8 @@ class CalibrationState:
 
     def world_to_pixel(self, x: float, y: float) -> Point2D:
         if not self.uses_placed_origin():
-            px, py = self._meters_delta_to_pixel(0.0, 0.0, x, y)
+            dy_m = -y if self.frame.y_up else y
+            px, py = self._meters_delta_to_pixel(0.0, 0.0, x, dy_m)
             return Point2D(px, py)
         origin = self.origin_point()
         dx_m, dy_m = _rotate(x, y, self.axis_angle())

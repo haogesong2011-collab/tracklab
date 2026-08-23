@@ -111,17 +111,18 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(skewed.mode, CalibrationMode.NONE)
         self.assertIn("夹角", skewed.warning)
 
-    def test_ruler_without_origin_keeps_image_y(self) -> None:
+    def test_ruler_without_origin_flips_y(self) -> None:
         state = uniform_state(Point2D(0, 0), Point2D(100, 0), length_m=1.0)
         self.assertIsNone(state.frame.origin)
+        self.assertTrue(state.frame.y_up)
         world = state.pixel_to_world(0, 100)
         self.assertAlmostEqual(world.x, 0.0, places=5)
-        self.assertAlmostEqual(world.y, 1.0, places=5)
+        self.assertAlmostEqual(world.y, -1.0, places=5)
         back = state.world_to_pixel(world.x, world.y)
         self.assertAlmostEqual(back.x, 0.0, places=5)
         self.assertAlmostEqual(back.y, 100.0, places=5)
 
-    def test_default_frame_y_down_from_origin(self) -> None:
+    def test_default_frame_y_up_from_origin(self) -> None:
         state = uniform_state(
             Point2D(0, 0),
             Point2D(100, 0),
@@ -129,10 +130,10 @@ class GeometryTests(unittest.TestCase):
             origin=Point2D(0, 0),
             axis_angle_deg=0.0,
         )
-        self.assertFalse(state.frame.y_up)
+        self.assertTrue(state.frame.y_up)
         below = state.pixel_to_world(0, 100)
         self.assertAlmostEqual(below.x, 0.0, places=5)
-        self.assertAlmostEqual(below.y, 1.0, places=5)
+        self.assertAlmostEqual(below.y, -1.0, places=5)
 
 
 if __name__ == "__main__":

@@ -11,11 +11,21 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from ai.kinematics import KinematicSample, contiguous_segments, is_low_confidence
+from ai.kinematics import (
+    DEFAULT_VELOCITY_STEP,
+    MAX_VELOCITY_STEP,
+    KinematicSample,
+    QuantityFit,
+    contiguous_segments,
+    fit_quantity,
+    is_low_confidence,
+)
 
 WARN = QColor("#f0c14b")
 
@@ -50,6 +60,8 @@ class TrackChartView(QChartView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setStyleSheet("background: #232323; border: none;")
+        self.setMinimumSize(150, 80)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._specs = specs
         self._samples: list[KinematicSample] = []
         self._series: list[QLineSeries] = []
@@ -59,6 +71,9 @@ class TrackChartView(QChartView):
         self._center_v: float | None = None
         self._fitted_t = (0.0, 1.0)
         self._fitted_v = (-1.0, 1.0)
+        self._fit_degree = 0
+        self._fit_series: QLineSeries | None = None
+        self._fit_result: QuantityFit | None = None
 
         chart = QChart()
         panel = QColor("#232323")
@@ -68,10 +83,10 @@ class TrackChartView(QChartView):
         chart.setDropShadowEnabled(False)
         chart.legend().hide()
         chart.setBackgroundRoundness(0)
-        chart.setMargins(QMargins(0, 0, 4, 0))
+        chart.setMargins(QMargins(8, 12, 10, 10))
         layout = chart.layout()
         if layout is not None:
-            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setContentsMargins(4, 4, 4, 4)
         self.setChart(chart)
 
         self._axis_time = QValueAxis()
@@ -82,6 +97,8 @@ class TrackChartView(QChartView):
             axis.setGridLineColor(QColor("#2f2f2f"))
             axis.setLinePenColor(QColor("#4a4a4a"))
             axis.setTitleText(title)
+            axis.setLabelFormat("%g")
+            axis.setTickCount(5)
         chart.addAxis(self._axis_time, Qt.AlignmentFlag.AlignBottom)
         chart.addAxis(self._axis_value, Qt.AlignmentFlag.AlignLeft)
 
@@ -105,11 +122,23 @@ class TrackChartView(QChartView):
         self._center_v = None
         self.set_samples(self._samples)
 
+    def set_fit_degree(self, degree: int) -> None:
+        self._fit_degree = max(0, min(2, int(degree)))
+        self.set_samples(self._samples)
+
+    @property
+    def fit_result(self) -> QuantityFit | None:
+        return self._fit_result
+
     def set_samples(self, samples: list[KinematicSample]) -> None:
         chart = self.chart()
         for series in self._series:
             chart.removeSeries(series)
         self._series = []
+        if self._fit_series is not None:
+            chart.removeSeries(self._fit_series)
+            self._fit_series = None
+        self._fit_result = None
         self._samples = samples
         if not samples:
             self._fitted_t = (0.0, 1.0)
@@ -151,6 +180,7 @@ class TrackChartView(QChartView):
                 scatter.attachAxis(self._axis_time)
                 scatter.attachAxis(self._axis_value)
                 self._series.append(scatter)  # type: ignore[arg-type]
+            self._apply_fit(chart, samples, attr, color)
 
         self._fit_axes(samples)
         for marker in chart.legend().markers():
@@ -192,6 +222,18 @@ class TrackChartView(QChartView):
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
+
+    def resizeEvent(self, event) -> None:  # noqa: ANN001
+        super().resizeEvent(event)
+        narrow = self.width() < 280
+        short = self.height() < 140
+        self._axis_value.setTitleVisible(not narrow)
+        self._axis_time.setTitleVisible(not short)
+        self._axis_value.setTickCount(4 if short else 5)
+        self._axis_time.setTickCount(4 if narrow else 5)
+        chart = self.chart()
+        if chart is not None:
+            chart.update()
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: ANN001
         if not self._samples:
@@ -273,6 +315,8 @@ class TrackChartView(QChartView):
             t1 = t0 + 1.0
         pad = (t1 - t0) * 0.04
         self._fitted_t = (t0 - pad, t1 + pad)
+        if self._fit_result is not None:
+            vals.extend(self._fit_result.evaluate(t0 + (t1 - t0) * i / 20.0) for i in range(21))
         if vals:
             lo, hi = min(vals), max(vals)
             if lo == hi:
@@ -283,9 +327,40 @@ class TrackChartView(QChartView):
             self._fitted_v = (-1.0, 1.0)
         self._apply_view()
 
+    def _apply_fit(
+        self, chart: QChart, samples: list[KinematicSample], attr: str, color: str
+    ) -> None:
+        if self._fit_degree < 1:
+            return
+        fitted = fit_quantity(samples, attr, self._fit_degree)
+        self._fit_result = fitted
+        if fitted is None:
+            return
+        times = [sample.time_s for sample in samples]
+        t0, t1 = min(times), max(times)
+        if t1 <= t0:
+            t1 = t0 + 1.0
+        series = QLineSeries()
+        series.setName("拟合")
+        pen = QPen(QColor(color).lighter(140))
+        pen.setWidth(1.6)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        series.setPen(pen)
+        steps = 80
+        for i in range(steps + 1):
+            time_s = t0 + (t1 - t0) * i / steps
+            series.append(time_s, fitted.evaluate(time_s))
+        chart.addSeries(series)
+        series.attachAxis(self._axis_time)
+        series.attachAxis(self._axis_value)
+        self._fit_series = series
+        for marker in chart.legend().markers(series):
+            marker.setVisible(False)
+
 
 class TrackChartPanel(QWidget):
     frame_activated = Signal(int)
+    velocity_step_changed = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -295,21 +370,42 @@ class TrackChartPanel(QWidget):
         self._speed_unit = "px/s"
         self._selects: list[QComboBox] = []
         self._charts: list[TrackChartView] = []
+        self._fit_labels: list[QLabel] = []
 
         header = QHBoxLayout()
         header.setContentsMargins(6, 2, 6, 0)
         header.setSpacing(8)
-        title = QLabel("分图")
-        title.setObjectName("panelTitle")
         hint = QLabel("滚轮缩放，双击复位")
         hint.setObjectName("panelHint")
+        step_label = QLabel("步长")
+        step_label.setObjectName("panelHint")
+        self._step = QSpinBox()
+        self._step.setObjectName("chartStep")
+        self._step.setRange(1, MAX_VELOCITY_STEP)
+        self._step.setValue(DEFAULT_VELOCITY_STEP)
+        self._step.setToolTip(
+            "Tracker 速度步长 N：v(i)=(p[i+N]−p[i−N])/(t[i+N]−t[i−N])。增大可压跟踪抖动。"
+        )
+        self._step.valueChanged.connect(self.velocity_step_changed.emit)
+        fit_label = QLabel("拟合")
+        fit_label.setObjectName("panelHint")
+        self._fit = QComboBox()
+        self._fit.setObjectName("chartFit")
+        self._fit.setToolTip("按当前分图数据做最小二乘拟合，并画虚线")
+        self._fit.addItem("关闭", 0)
+        self._fit.addItem("线性", 1)
+        self._fit.addItem("二次", 2)
+        self._fit.currentIndexChanged.connect(self._apply_fit_mode)
         reset = QPushButton("复位")
         reset.setObjectName("panelButton")
         reset.setToolTip("恢复分图默认显示范围")
         reset.clicked.connect(self.reset_zoom)
-        header.addWidget(title)
-        header.addStretch()
         header.addWidget(hint)
+        header.addStretch()
+        header.addWidget(step_label)
+        header.addWidget(self._step)
+        header.addWidget(fit_label)
+        header.addWidget(self._fit)
         header.addWidget(reset)
 
         layout = QVBoxLayout(self)
@@ -349,10 +445,15 @@ class TrackChartPanel(QWidget):
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(6, 0, 4, 0)
             row_layout.setSpacing(6)
+            equation = QLabel("")
+            equation.setObjectName("chartFitLabel")
+            equation.setWordWrap(True)
+            equation.hide()
             row_layout.addWidget(combo, stretch=0)
-            row_layout.addStretch()
+            row_layout.addWidget(equation, stretch=1)
             row_layout.addWidget(minus)
             row_layout.addWidget(plus)
+            self._fit_labels.append(equation)
             layout.addWidget(row)
             layout.addWidget(chart, stretch=1)
 
@@ -364,6 +465,30 @@ class TrackChartPanel(QWidget):
         attr, name, color, axis = self._series().get(key, self._series()["x"])
         chart.set_spec(attr, name, color, axis)
         chart.highlight_frame(self._frame)
+        self._refresh_fit_labels()
+
+    def _apply_fit_mode(self) -> None:
+        degree = int(self._fit.currentData() or 0)
+        for chart in self._charts:
+            chart.set_fit_degree(degree)
+        self._refresh_fit_labels()
+
+    def _refresh_fit_labels(self) -> None:
+        for chart, combo, label in zip(self._charts, self._selects, self._fit_labels):
+            fitted = chart.fit_result
+            if fitted is None:
+                label.hide()
+                label.setText("")
+                continue
+            key = str(combo.currentData() or "x")
+            name = self._series().get(key, self._series()["x"])[1]
+            label.setText(fitted.equation(name))
+            label.setToolTip(label.text())
+            label.show()
+
+    @property
+    def velocity_step(self) -> int:
+        return int(self._step.value())
 
     def set_units(self, position_unit: str, speed_unit: str) -> None:
         if position_unit == self._position_unit and speed_unit == self._speed_unit:
@@ -388,6 +513,7 @@ class TrackChartPanel(QWidget):
             self.set_units(samples[0].position_unit, samples[0].speed_unit)
         for chart in self._charts:
             chart.set_samples(samples)
+        self._refresh_fit_labels()
         self.highlight_frame(self._frame)
 
     def highlight_frame(self, frame: int) -> None:

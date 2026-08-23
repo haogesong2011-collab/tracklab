@@ -607,63 +607,32 @@ def derive_physics_from_track(
     length_m: float | None = None,
     period_hint: bool = False,
 ) -> PhysicsResult:
-    """Lightweight physics estimates used for end-to-end gates on synthetic data."""
-    pts = [(p.frame, p.x, p.y) for p in track.points if p.visible]
-    if len(pts) < 5:
+    """Compatibility wrapper: evaluation still talks PhysicsResult."""
+    from ai.physics import (
+        analyze_experiment,
+        calibration_from_ppm,
+        physics_result_from_analysis,
+        video_info_from_fps,
+    )
+
+    visible = sum(1 for point in track.points if point.visible)
+    if visible < 5:
         return PhysicsResult(
             clip_id=clip_id,
             failure_reason=FailureReason.LOW_CONFIDENCE,
             confidence=0.0,
         )
-    ys = np.array([p[2] for p in pts], dtype=np.float64)
-    xs = np.array([p[1] for p in pts], dtype=np.float64)
-    ts = np.array([p[0] / fps for p in pts], dtype=np.float64)
-
-    period = None
-    if period_hint or (ys.max() - ys.min() > 5):
-        # Zero-crossing of x around mean for pendulum-like motion.
-        xc = xs - xs.mean()
-        crossings = [
-            i
-            for i in range(1, len(xc))
-            if xc[i - 1] <= 0 < xc[i] or xc[i - 1] >= 0 > xc[i]
-        ]
-        if len(crossings) >= 3:
-            half_periods = [
-                ts[crossings[i + 1]] - ts[crossings[i]]
-                for i in range(len(crossings) - 1)
-            ]
-            period = float(2 * np.median(half_periods))
-
-    gravity = None
-    fit_err = None
-    if period and length_m and length_m > 0:
-        # Small-angle pendulum: T = 2π √(L/g)  →  g = 4π² L / T²
-        gravity = float(4 * math.pi**2 * length_m / (period**2))
-    elif len(ts) >= 6:
-        # Fit y = a + b t + c t^2  (screen y grows downward) for projectiles.
-        A = np.column_stack([np.ones_like(ts), ts, ts**2])
-        coef, *_ = np.linalg.lstsq(A, ys, rcond=None)
-        residual = ys - A @ coef
-        fit_err = float(np.sqrt(np.mean(residual**2)) / max(abs(ys).max(), 1.0))
-        if pixels_per_meter and pixels_per_meter > 0:
-            gravity = float(abs(2 * coef[2] / pixels_per_meter))
-
-    velocity = None
-    if len(ts) >= 2 and pixels_per_meter and pixels_per_meter > 0:
-        dx = (xs[-1] - xs[0]) / pixels_per_meter
-        dt = ts[-1] - ts[0]
-        if dt > 0:
-            velocity = float(dx / dt)
-
-    return PhysicsResult(
+    analysis = analyze_experiment(
+        track,
+        video_info_from_fps(track, fps),
+        calibration_from_ppm(pixels_per_meter),
         clip_id=clip_id,
-        period_s=period,
-        gravity_ms2=gravity,
-        velocity_ms=velocity,
-        trajectory_fit_error=fit_err,
-        confidence=0.8,
+        pendulum_length_m=length_m,
+        period_hint=period_hint,
     )
+    result = physics_result_from_analysis(analysis)
+    result.clip_id = clip_id
+    return result
 
 
 def load_video(path) -> VideoInfo:
