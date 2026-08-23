@@ -1,6 +1,6 @@
 # TrackLab
 
-物理视频分析工具（Tracker 工作流的重做）。当前版本是 Tracker 风格的 SAM 2 跟踪工作台：导入视频、多轨点选/框选目标、异步传播掩膜质心轨迹。
+物理视频分析工具（Tracker 工作流的重做）。自动跟踪分为快速和精准：快速模式采用 Tracker Autotracker 风格的模板匹配，精准模式采用 SAM 2.1 Tiny 视频掩膜传播。
 
 ## 运行
 
@@ -8,15 +8,15 @@
 cd ~/Projects/tracklab
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-# 桌面 SAM 2 跟踪（可选）：pip install -r requirements-ai.txt
+python -m pip install -r requirements.txt
+# 精准模式（可选）：python -m pip install -r requirements-ai.txt
 python -m app
 ```
 
 打开窗口后，把 mp4 / mov 等文件拖进去，或点「打开」/ 点击中央区域。打开是秒开的，进度条一格一帧。
 
 - 空格：播放 / 暂停（逐帧显示，不跳帧）
-- T：SAM 2 自动跟踪当前轨迹（独立线程）；再按一次取消
+- T：按当前“快速 / 精准”模式自动跟踪；再按一次取消
 - 新建轨迹：右侧列表可管理多条轨迹
 - 点击画面：正点选目标；Shift+点击为负点；拖动为框选
 - 跟踪完成后点击即手工修正当前帧，可再按 T 从该帧重跟踪
@@ -26,7 +26,7 @@ python -m app
 - 拖动进度条：立即暂停，画面跟着指针走，松手后停在该帧
 - 左右方向键：按底栏选择的步长前进 / 后退（1–5 帧）
 - 底栏最左的下拉框：25% – 200% 播放速度
-- 进度条上方两个三角：循环区间的起点和终点，可直接拖动；I / O 把起点、终点设到当前帧
+- 进度条上方两个三角：循环区间的起点和终点，拖动时画面同步预览；I / O 把起点、终点设到当前帧
 - 底栏最右的循环按钮：在这个区间内反复播放
 - 文件 → 关闭视频：关掉解码器并释放缓存
 

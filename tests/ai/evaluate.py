@@ -128,6 +128,10 @@ def evaluate_clip(entry, model_bundle: str, seed: int = 0) -> ClipReport:
                 from ai.sam2_tracker import Sam2Tracker  # noqa: PLC0415
 
                 model = Sam2Tracker()
+            elif model_bundle in {"autotracker", "fast"}:
+                from ai.autotracker import TrackerAutoTracker  # noqa: PLC0415
+
+                model = TrackerAutoTracker()
             else:
                 model = ColorBlobTracker()
             seed_xy = (ann.track[0].center.x, ann.track[0].center.y)
@@ -162,6 +166,10 @@ def evaluate_clip(entry, model_bundle: str, seed: int = 0) -> ClipReport:
                 from ai.sam2_tracker import Sam2Tracker  # noqa: PLC0415
 
                 tracker = Sam2Tracker()
+            elif model_bundle in {"autotracker", "fast"}:
+                from ai.autotracker import TrackerAutoTracker  # noqa: PLC0415
+
+                tracker = TrackerAutoTracker()
             else:
                 tracker = ColorBlobTracker()
             seed_xy = (ann.track[0].center.x, ann.track[0].center.y)
@@ -347,7 +355,11 @@ def run_eval(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="TrackLab AI evaluator")
     parser.add_argument("--split", default="ci", choices=["ci", "dev", "holdout", "all"])
-    parser.add_argument("--model", default="baseline", choices=["baseline", "oracle", "sam2"])
+    parser.add_argument(
+        "--model",
+        default="baseline",
+        choices=["baseline", "oracle", "sam2", "autotracker", "fast"],
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--include-holdout", action="store_true")
     parser.add_argument("--save-baseline", action="store_true")

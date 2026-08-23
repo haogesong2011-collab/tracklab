@@ -1,0 +1,239 @@
+{
+  "clip_id": "physics_freefall",
+  "schema_version": "1.0.0",
+  "task": "physics",
+  "scene": "freefall",
+  "difficulty": "normal",
+  "width": 320,
+  "height": 180,
+  "fps": 30.0,
+  "frame_count": 20,
+  "track": [
+    {
+      "frame": 0,
+      "center": {
+        "x": 160.0,
+        "y": 18.0
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 1,
+      "center": {
+        "x": 160.0,
+        "y": 18.545
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 2,
+      "center": {
+        "x": 160.0,
+        "y": 20.18
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 3,
+      "center": {
+        "x": 160.0,
+        "y": 22.905
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 4,
+      "center": {
+        "x": 160.0,
+        "y": 26.72
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 5,
+      "center": {
+        "x": 160.0,
+        "y": 31.625
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 6,
+      "center": {
+        "x": 160.0,
+        "y": 37.620000000000005
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 7,
+      "center": {
+        "x": 160.0,
+        "y": 44.705
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 8,
+      "center": {
+        "x": 160.0,
+        "y": 52.88
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 9,
+      "center": {
+        "x": 160.0,
+        "y": 62.145
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 10,
+      "center": {
+        "x": 160.0,
+        "y": 72.5
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 11,
+      "center": {
+        "x": 160.0,
+        "y": 83.945
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 12,
+      "center": {
+        "x": 160.0,
+        "y": 96.48000000000002
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 13,
+      "center": {
+        "x": 160.0,
+        "y": 110.105
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 14,
+      "center": {
+        "x": 160.0,
+        "y": 124.82000000000001
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 15,
+      "center": {
+        "x": 160.0,
+        "y": 140.625
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 16,
+      "center": {
+        "x": 160.0,
+        "y": 157.52
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 17,
+      "center": {
+        "x": 160.0,
+        "y": 175.505
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 18,
+      "center": {
+        "x": 160.0,
+        "y": 194.58
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 19,
+      "center": {
+        "x": 160.0,
+        "y": 214.74499999999998
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    }
+  ],
+  "pose": [],
+  "calibration": {
+    "ruler_a": {
+      "x": 10,
+      "y": 160
+    },
+    "ruler_b": {
+      "x": 110.0,
+      "y": 160
+    },
+    "length_m": 1.0,
+    "origin": {
+      "x": 160,
+      "y": 18
+    },
+    "axis_angle_deg": 0.0,
+    "has_reliable_ruler": true
+  },
+  "physics": {
+    "period_s": null,
+    "gravity_ms2": 9.81,
+    "velocity_ms": null,
+    "acceleration_ms2": null,
+    "trajectory_fit_error": 0.0
+  },
+  "notes": "synthetic free fall"
+}

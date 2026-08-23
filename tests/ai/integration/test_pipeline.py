@@ -134,6 +134,22 @@ class DecoderAIIntegrationTests(unittest.TestCase):
         self.assertEqual(merged[6].y, correction.points[0].y)
         self.assertEqual(info.pts_ms[merged[-1].frame], info.pts_ms[12])
 
+    def test_tracker_autotracker_covers_ball_clip(self) -> None:
+        from ai.autotracker import TrackerAutoTracker
+
+        manifest = load_manifest()
+        entry = next(e for e in manifest.entries if e.clip_id == "track_ball_normal")
+        ann = load_annotation(entry.annotation_path)
+        info = load_video(resolve_video(entry))
+        seed = (ann.track[0].center.x, ann.track[0].center.y)
+        result = TrackerAutoTracker().track(info, seed)
+        self.assertEqual([p.frame for p in result.points], list(range(info.frame_count)))
+        self.assertGreater(sum(1 for p in result.points if p.visible), info.frame_count // 2)
+        last_gt = ann.track[-1].center
+        last = result.points[-1]
+        self.assertLess(abs(last.x - last_gt.x), 12.0)
+        self.assertLess(abs(last.y - last_gt.y), 12.0)
+
 
 if __name__ == "__main__":
     unittest.main()

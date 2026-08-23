@@ -34,6 +34,8 @@ class Scene(str, Enum):
     TURNTABLE = "turntable"
     JUMP = "jump"
     MIXED = "mixed"
+    FREEFALL = "freefall"
+    ACCEL = "accel"
 
 
 # COCO-17 style keypoints used for pose evaluation in physics-education clips.

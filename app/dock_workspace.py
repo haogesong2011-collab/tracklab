@@ -10,6 +10,9 @@ CHART_DOCK = "chartDock"
 DATA_DOCK = "dataDock"
 RIGHT_RATIO = 0.31
 CHART_RATIO = 0.60
+# Old workspace/state blobs may include nested/tabified AI docks and
+# SIGSEGV inside Qt restoreState. Bump this key after dock-structure changes.
+STATE_KEY = "workspace/state_v2"
 
 
 def _on_screen(rect: QRect) -> bool:
@@ -124,7 +127,7 @@ class DockWorkspace(QMainWindow):
     def save_prefs(self, settings: QSettings) -> None:
         self.chart_dock.remember_float_size()
         self.data_dock.remember_float_size()
-        settings.setValue("workspace/state", self.saveState())
+        settings.setValue(STATE_KEY, self.saveState())
         settings.setValue("workspace/chart_float", self.chart_dock.isFloating())
         settings.setValue("workspace/data_float", self.data_dock.isFloating())
         settings.setValue("workspace/chart_visible", self.chart_visible)
@@ -133,7 +136,7 @@ class DockWorkspace(QMainWindow):
         settings.setValue("workspace/data_geo", self.data_dock.saveGeometry())
 
     def restore_prefs(self, settings: QSettings) -> None:
-        state = settings.value("workspace/state")
+        state = settings.value(STATE_KEY)
         if isinstance(state, QByteArray) and not state.isEmpty():
             self.restoreState(state)
         for dock, prefix in (
@@ -153,10 +156,23 @@ class DockWorkspace(QMainWindow):
         for dock in (self.chart_dock, self.data_dock):
             if dock.isFloating() and not _on_screen(dock.frameGeometry()):
                 dock.setFloating(False)
+        if not self._layout_ok():
+            self.restore_default()
+            return
         chart_docked = self.chart_visible and not self.chart_dock.isFloating()
         data_docked = self.data_visible and not self.data_dock.isFloating()
         if chart_docked or data_docked:
             self._normalize()
+
+    def _layout_ok(self) -> bool:
+        if self.tabifiedDockWidgets(self.chart_dock) or self.tabifiedDockWidgets(self.data_dock):
+            return False
+        for dock in (self.chart_dock, self.data_dock):
+            if dock.isHidden() or dock.isFloating():
+                continue
+            if self.dockWidgetArea(dock) != Qt.DockWidgetArea.RightDockWidgetArea:
+                return False
+        return True
 
     def _dock_home(self, dock: _HomeDock) -> None:
         dock.remember_float_size()

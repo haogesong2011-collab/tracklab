@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -91,6 +92,11 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertNotIn("app.frame_pump", inspect.getsource(stabilize))
         self.assertNotIn("frame_pump", inspect.getsource(ShakeWorker))
         self.assertNotIn("FramePump", inspect.getsource(ShakeWorker.run))
+        import ai.assistant_worker as assistant_worker
+        from ai.assistant_worker import AssistantWorker
+
+        self.assertNotIn("app.frame_pump", inspect.getsource(assistant_worker))
+        self.assertNotIn("FramePump", inspect.getsource(AssistantWorker.run))
 
     def test_track_frames_cover_decoder_indices(self) -> None:
         from ai.models import ColorBlobTracker, load_video
@@ -261,6 +267,16 @@ class DesktopAcceptanceTests(unittest.TestCase):
         window._reset_zoom()
         self.assertAlmostEqual(window._video.zoom(), 1.0)
         self.assertEqual(window._zoom_readout.text(), "100%")
+        self.assertEqual(window._track_mode.value, "fast")
+        self.assertFalse(hasattr(window, "_toolbar_mode_combo"))
+        self.assertEqual(window._list_panel._mode_combo.currentData(), "fast")
+        window._apply_track_mode("precise", persist=False)
+        self.assertEqual(window._track_mode.value, "precise")
+        self.assertTrue(window._precise_mode_action.isChecked())
+        src = inspect.getsource(MainWindow._start_or_cancel_ai_track)
+        self.assertIn("TrackMode.PRECISE", src)
+        self.assertIn("create_tracker", src)
+        self.assertNotIn("ColorBlobTracker", src)
         window._clear_cache()
         self.assertFalse(window._shake_action.isEnabled())
         self.assertTrue(window._shake_apply_action.isChecked())
@@ -434,7 +450,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
         window._shake_enabled = True
         window._refresh_track_ui()
         self.assertEqual(window._data_panel._table.item(1, 2).text(), "10.00")
-        self.assertEqual(window._data_panel._table.item(1, 3).text(), "20.00")
+        self.assertEqual(window._data_panel._table.item(1, 3).text(), "-20.00")
         window._apply_track_overlay(1)
         self.assertEqual(window._video._overlays[0].points[1][1], 16)
         self.assertEqual(window._video._overlays[0].points[1][2], 27)
@@ -455,12 +471,44 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertEqual(window._video._anchors, [])
         window.close()
 
-    def test_default_worker_uses_sam2_not_color_blob(self) -> None:
-        from ai.desktop import TrackWorker
+    def test_default_worker_uses_tracker_autotracker_not_color_blob(self) -> None:
+        from ai.contracts import TrackMode
+        from ai.desktop import TrackWorker, create_tracker
+        from ai.autotracker import TrackerAutoTracker
+        from ai.sam2_tracker import Sam2Tracker
 
         source = inspect.getsource(TrackWorker.run)
-        self.assertIn("Sam2Tracker", source)
+        self.assertIn("create_tracker", source)
+        self.assertIn("TrackMode.FAST", source)
         self.assertNotIn("ColorBlobTracker()", source)
+        self.assertIsInstance(create_tracker(TrackMode.FAST), TrackerAutoTracker)
+        self.assertIsInstance(create_tracker(TrackMode.PRECISE), Sam2Tracker)
+
+    def test_loop_marker_drag_emits_preview_frame(self) -> None:
+        from PySide6.QtCore import QPointF
+
+        from app.main_window import MainWindow
+        from app.widgets import TimelineSlider
+
+        class MoveEvent:
+            def __init__(self, x: float) -> None:
+                self._position = QPointF(x, 0)
+
+            def position(self) -> QPointF:
+                return self._position
+
+        slider = TimelineSlider()
+        slider.resize(500, 36)
+        slider.setRange(0, 100)
+        slider.set_loop_range(20, 80)
+        moved: list[int] = []
+        slider.loop_marker_moved.connect(moved.append)
+        slider._dragging = "start"
+        slider.mouseMoveEvent(MoveEvent(slider._x_for(40)))
+        self.assertEqual(slider.loop_range(), (40, 80))
+        self.assertEqual(moved[-1], 40)
+        source = inspect.getsource(MainWindow._on_loop_marker_moved)
+        self.assertIn("_show_frame(frame)", source)
 
     def test_project_v3_calibration_roundtrip_and_legacy_v2(self) -> None:
         from ai.calibration import CalibrationMode, uniform_state
@@ -481,6 +529,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
                 result,
                 calibration=cal,
                 show_calibration=False,
+                track_mode="precise",
             )
             doc = read_track_project(path)
             v2 = Path(tmp) / "v2.json"
@@ -495,8 +544,9 @@ class DesktopAcceptanceTests(unittest.TestCase):
                 encoding="utf-8",
             )
             old = read_track_project(v2)
-        self.assertEqual(doc.schema, "tracklab.project.v3")
+        self.assertEqual(doc.schema, "tracklab.project.v4")
         self.assertFalse(doc.show_calibration)
+        self.assertEqual(doc.track_mode.value, "precise")
         self.assertEqual(doc.calibration.mode, CalibrationMode.UNIFORM)
         self.assertAlmostEqual(doc.calibration.frame.origin_x or 0.0, 5.0)
         self.assertEqual(old.schema, "tracklab.project.v2")
@@ -611,17 +661,17 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertAlmostEqual(length, expected, places=1)
         self.assertGreater(length, 600.0)
         self.assertGreater(xx, ox)
-        self.assertGreater(yy, oy)
+        self.assertLess(yy, oy)
         window._on_axis_dragged("origin", 100.0, 200.0)
         self.assertAlmostEqual(window._calibration.frame.origin_x or 0.0, 100.0)
         self.assertAlmostEqual(window._calibration.frame.origin_y or 0.0, 200.0)
         window._on_axis_drag_finished()
         window._on_axis_dragged("rotate", 200.0, 200.0, False)
-        window._on_axis_dragged("rotate", 200.0, 300.0, False)
+        window._on_axis_dragged("rotate", 200.0, 100.0, False)
         self.assertAlmostEqual(window._calibration.frame.axis_angle_deg, 45.0, places=1)
         window._on_axis_drag_finished()
         window._on_axis_dragged("rotate", 200.0, 200.0, False)
-        window._on_axis_dragged("rotate", 200.0, 300.0, True)
+        window._on_axis_dragged("rotate", 200.0, 100.0, True)
         self.assertAlmostEqual(window._calibration.frame.axis_angle_deg % 360.0, 90.0, places=1)
         window._exit_interaction()
         self.assertEqual(window._video.interaction_mode(), MODE_TRACK)
@@ -653,6 +703,8 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertEqual(window._chart_panel._charts[0]._axis_value.titleText(), "x (m)")
         self.assertIn("vₓ", window._chart_panel._selects[0].itemText(2))
         self.assertIn("m/s", window._chart_panel._selects[0].itemText(2))
+        self.assertEqual(window._chart_panel.velocity_step, 3)
+        self.assertEqual(window._chart_panel._fit.itemText(1), "线性")
         window.close()
 
     def test_docks_float_and_redock_right_only(self) -> None:
@@ -684,7 +736,296 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertFalse(data.isFloating())
         self.assertTrue(window._chart_action.isChecked())
         self.assertTrue(window._table_action.isChecked())
+        from PySide6.QtCore import QByteArray, QSettings
+
+        from app.dock_workspace import STATE_KEY
+
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = QSettings(
+                str(Path(tmp) / "prefs.ini"),
+                QSettings.Format.IniFormat,
+            )
+            settings.setValue("workspace/state", QByteArray(b"corrupt-nested-dock-blob"))
+            window._workspace.restore_prefs(settings)
+        self.assertEqual(STATE_KEY, "workspace/state_v2")
+        self.assertEqual(
+            window._workspace.dockWidgetArea(chart),
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        )
+        self.assertEqual(window._workspace.tabifiedDockWidgets(chart), [])
         window.close()
+
+    def test_assistant_entry_and_default_hidden(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+
+        from app.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        _ = app
+        window = MainWindow()
+        window.show()
+        self.assertFalse(window._assistant_window.isVisible())
+        self.assertIsNone(getattr(window._workspace, "assistant_dock", None))
+        self.assertFalse(window._workspace.isAncestorOf(window._assistant_panel))
+        self.assertEqual(window._assistant_window.windowTitle(), "TrackLab 助手")
+        self.assertTrue(window._assistant_panel._length_box.isHidden())
+        self.assertEqual(
+            window._workspace.chart_dock.allowedAreas(),
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        )
+        window._show_assistant_panel()
+        self.assertTrue(window._assistant_window.isVisible())
+        self.assertIs(window._assistant_window.centralWidget(), window._assistant_panel)
+        window._set_assistant_visible(False)
+        self.assertFalse(window._assistant_window.isVisible())
+        window._assistant_window_action.setChecked(True)
+        self.assertTrue(window._assistant_window.isVisible())
+        window._assistant_panel.add_user_message("会话应保留")
+        window._assistant_window.close()
+        self.assertTrue(window.isVisible())
+        self.assertFalse(window._assistant_window.isVisible())
+        self.assertIn("会话应保留", window._assistant_panel.chat_text())
+        window._show_assistant_panel()
+        self.assertTrue(window._assistant_window.isVisible())
+        self.assertIn("会话应保留", window._assistant_panel.chat_text())
+        window.close()
+
+    def test_assistant_open_then_data_table_click_stays_alive(self) -> None:
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QApplication, QTableWidgetItem
+
+        from app.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        window = MainWindow()
+        window.resize(1280, 800)
+        window.show()
+        app.processEvents()
+        workspace = window._workspace
+        self.assertIsNone(getattr(workspace, "assistant_dock", None))
+        self.assertEqual(
+            workspace.dockWidgetArea(workspace.chart_dock),
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        )
+        self.assertEqual(
+            workspace.dockWidgetArea(workspace.data_dock),
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        )
+        window._show_assistant_panel()
+        app.processEvents()
+        self.assertTrue(window._assistant_window.isVisible())
+        self.assertFalse(workspace.isAncestorOf(window._assistant_panel))
+        self.assertEqual(
+            workspace.dockWidgetArea(workspace.chart_dock),
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        )
+        self.assertEqual(
+            workspace.dockWidgetArea(workspace.data_dock),
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        )
+        self.assertEqual(workspace.tabifiedDockWidgets(workspace.chart_dock), [])
+        self.assertEqual(workspace.tabifiedDockWidgets(workspace.data_dock), [])
+        table = window._data_panel._table
+        table.setRowCount(2)
+        for row in range(2):
+            item = QTableWidgetItem(str(row + 1))
+            item.setData(Qt.ItemDataRole.UserRole, row)
+            table.setItem(row, 0, item)
+        app.processEvents()
+        viewport = table.viewport()
+        QTest.mouseClick(
+            viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(16, 12)
+        )
+        app.processEvents()
+        QTest.mouseClick(
+            table.horizontalHeader(),
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            QPoint(24, 6),
+        )
+        app.processEvents()
+        workspace.data_dock.raise_()
+        app.processEvents()
+        workspace._normalize()
+        app.processEvents()
+        self.assertTrue(window.isVisible())
+        self.assertTrue(workspace.data_visible)
+        self.assertTrue(window._assistant_window.isVisible())
+        self.assertFalse(workspace.data_dock.isHidden())
+        self.assertEqual(workspace.tabifiedDockWidgets(workspace.chart_dock), [])
+        self.assertEqual(workspace.tabifiedDockWidgets(workspace.data_dock), [])
+        window.close()
+
+    def test_assistant_gating_without_key_or_track(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        from app.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        _ = app
+        window = MainWindow()
+        self.assertFalse(window._ai_analyze_action.isEnabled())
+        self.assertFalse(window._ai_report_action.isEnabled())
+        window._generate_assistant_report()
+        self.assertFalse(window._assistant_busy)
+        window.close()
+
+    def test_assistant_stream_stop_and_stale(self) -> None:
+        from PySide6.QtWidgets import QApplication, QFrame
+
+        from ai.api_credentials import set_api_key
+        from ai.contracts import TrackLayer, TrackPoint, TrackResult
+        from app.main_window import MainWindow
+        from engine.video_index import VideoInfo
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        _ = app
+        set_api_key("sk-test", persist=False)
+        window = MainWindow()
+        window._info = VideoInfo(
+            path=Path("clip.mp4"),
+            width=64,
+            height=64,
+            pts=tuple(range(8)),
+            time_base=0.001,
+            pts_ms=tuple(i * 33 for i in range(8)),
+        )
+        points = [TrackPoint(frame=i, x=float(i * 4), y=10.0) for i in range(8)]
+        window._tracks = [
+            TrackLayer(track_id="t1", name="轨迹 1", result=TrackResult(clip_id="c", points=points))
+        ]
+        window._active_id = "t1"
+        chunks = [
+            'data: {"choices":[{"delta":{"content":"甲"}}]}',
+            'data: {"choices":[{"delta":{"content":"乙"}}]}',
+            "data: [DONE]",
+        ]
+
+        def transport(url, headers, payload, timeout, stream):
+            self.assertNotIn("sk-test", url)
+            return list(chunks)
+
+        window._assistant_transport = transport
+        window._refresh_track_ui()
+        window._analyze_experiment()
+        deadline = time.time() + 3
+        while window._assistant_busy and time.time() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        app.processEvents()
+        self.assertIsNotNone(window._assistant_state.analysis)
+        self.assertIn("本地轨迹拟合", window._assistant_panel.chat_text())
+        analysis = window._assistant_state.analysis
+        chosen = analysis.selected or (analysis.candidates[0] if analysis.candidates else None)
+        self.assertIsNotNone(chosen)
+        window._assistant_state.confirmed_type = chosen.experiment_type
+        window._send_assistant_chat("解释一下")
+        deadline = time.time() + 3
+        while window._assistant_busy and time.time() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        app.processEvents()
+        self.assertTrue(any(m.role == "assistant" for m in window._assistant_state.messages))
+        thoughts = window._assistant_panel._chat._host.findChildren(QFrame)
+        thinking = [w for w in thoughts if w.objectName() == "assistantThinking"]
+        self.assertTrue(thinking)
+        self.assertIn("已思考", thinking[-1]._toggle.text())
+        window._tracks[0].result.points[0].x = 99.0
+        window._refresh_track_ui()
+        self.assertTrue(window._assistant_state.stale)
+        window.close()
+        from ai import api_credentials as creds
+
+        creds._session_key = None
+
+    def test_project_v4_assistant_roundtrip_and_v3_compat(self) -> None:
+        from ai.contracts import AssistantState, ExperimentType, TeachingLevel
+
+        result = TrackResult(
+            clip_id="demo",
+            points=[TrackPoint(frame=0, x=10, y=20)],
+        )
+        state = AssistantState(
+            confirmed_type=ExperimentType.UNIFORM_LINEAR,
+            fingerprint="abc123",
+            report_markdown="# 报告\nv = 1.5 m/s",
+            teaching_level=TeachingLevel.HIGH,
+            model_id="deepseek-v4-flash",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "lab.json"
+            write_track_project(
+                path,
+                Path("/tmp/clip.mp4"),
+                result,
+                assistant=state,
+            )
+            raw = path.read_text(encoding="utf-8")
+            self.assertNotIn("sk-", raw)
+            self.assertNotIn("DEEPSEEK", raw)
+            doc = read_track_project(path)
+            v3 = Path(tmp) / "v3.json"
+            v3.write_text(
+                json.dumps(
+                    {
+                        "schema": "tracklab.project.v3",
+                        "video_path": "/tmp/old.mp4",
+                        "tracks": [layer_from_result(result).to_dict()],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            old = read_track_project(v3)
+            md_path = Path(tmp) / "report.md"
+            from ai.desktop import export_assistant_report
+
+            export_assistant_report(md_path, doc.assistant.report_markdown)
+            self.assertEqual(doc.schema, "tracklab.project.v4")
+            self.assertEqual(doc.assistant.confirmed_type, ExperimentType.UNIFORM_LINEAR)
+            self.assertIn("1.5", doc.assistant.report_markdown)
+            self.assertEqual(old.schema, "tracklab.project.v3")
+            self.assertIsNone(old.assistant.analysis)
+            self.assertTrue(md_path.read_text(encoding="utf-8").startswith("# 报告"))
+
+    def test_report_numbers_come_from_local_analysis(self) -> None:
+        from ai.assistant_report import render_report_markdown
+        from ai.contracts import ExperimentAnalysis, ExperimentCandidate, ExperimentType, FitResult
+
+        fit = FitResult(
+            model="s=s0+vt",
+            formula_id="uniform.s",
+            frame_start=0,
+            frame_end=9,
+            time_start_s=0.0,
+            time_end_s=0.3,
+            parameters={"v": 1.23456, "s0": 0.0},
+            units={"v": "m/s", "s0": "m"},
+            r2=0.99,
+            nrmse=0.01,
+            n_samples=10,
+        )
+        candidate = ExperimentCandidate(
+            experiment_type=ExperimentType.UNIFORM_LINEAR,
+            label="匀速直线运动",
+            confidence=0.9,
+            fit=fit,
+        )
+        analysis = ExperimentAnalysis(
+            clip_id="demo",
+            candidates=[candidate],
+            selected=candidate,
+            calibration_active=True,
+            position_unit="m",
+        )
+        markdown = render_report_markdown(
+            analysis,
+            confirmed_type=ExperimentType.UNIFORM_LINEAR,
+            sections={"purpose": "测速度", "conclusion": "模型不得改写 9.9"},
+        )
+        self.assertIn("1.23456", markdown)
+        self.assertIn("测速度", markdown)
 
 
 if __name__ == "__main__":

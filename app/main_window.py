@@ -5,9 +5,12 @@ import os
 import time
 from pathlib import Path
 
+from datetime import datetime
+
 from PySide6.QtCore import QByteArray, QEvent, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QImage, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QDragEnterEvent, QDropEvent, QImage, QKeySequence
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -27,6 +30,13 @@ from app.icons import (
     play_icon,
     prev_icon,
     toolbar_icon,
+)
+from app.assistant_panel import (
+    AssistantPanel,
+    AssistantWindow,
+    DeepSeekSettingsDialog,
+    show_payload_preview,
+    warn_missing_key,
 )
 from app.calibration_dialog import CalibrationDialog
 from app.dock_workspace import DockWorkspace, _on_screen
@@ -52,6 +62,16 @@ from app.widgets import (
     axis_pointer_angle,
     snap_axis_angle,
 )
+from ai.api_credentials import get_api_key, has_api_key
+from ai.assistant_context import (
+    assert_private_context,
+    build_teaching_context,
+    chat_messages,
+    preview_payload,
+    report_messages,
+)
+from ai.assistant_report import merge_report_sections, render_report_markdown
+from ai.assistant_worker import AssistantJob, AssistantOutcome, run_assistant_in_thread
 from ai.calibration import (
     CalibrationMode,
     CalibrationState,
@@ -63,14 +83,23 @@ from ai.calibration import (
 )
 from ai.contracts import (
     TRACK_COLORS,
+    AssistantState,
+    ChatMessage,
+    ExperimentType,
     ProgressEvent,
     PromptKind,
+    TeachingLevel,
     TrackLayer,
+    TrackMode,
     TrackPrompt,
     TrackResult,
 )
+from ai.deepseek_client import DEFAULT_CHAT_MODEL, DEFAULT_REPORT_MODEL
 from ai.desktop import (
     apply_manual_override,
+    build_assistant_report,
+    create_tracker,
+    export_assistant_report,
     export_track_csv,
     new_track_id,
     read_track_project,
@@ -79,6 +108,7 @@ from ai.desktop import (
     write_track_project,
 )
 from ai.kinematics import sample_at_frame, series_for_result
+from ai.physics import source_fingerprint
 from ai.model_manager import DEFAULT_SPEC
 from ai.sam2_tracker import merge_track_points
 from ai.schema import Point2D
@@ -141,6 +171,14 @@ class MainWindow(QMainWindow):
         self._axis_undo_pushed = False
         self._axis_rotate_base: tuple[float, float] | None = None
         self._cal_drawn_before_shake = False
+        self._assistant_thread = None
+        self._assistant_worker = None
+        self._assistant_state = AssistantState()
+        self._assistant_busy = False
+        self._chat_model = DEFAULT_CHAT_MODEL
+        self._report_model = DEFAULT_REPORT_MODEL
+        self._assistant_transport = None
+        self._track_mode = TrackMode.FAST
 
         self._video = VideoView()
         self._hint = DropHint()
@@ -165,6 +203,7 @@ class MainWindow(QMainWindow):
         self._list_panel.track_requested.connect(self._start_or_cancel_ai_track)
         self._list_panel.cancel_requested.connect(self._cancel_ai_track)
         self._list_panel.shake_toggled.connect(self._on_shake_apply_toggled)
+        self._list_panel.mode_changed.connect(self._on_list_mode_changed)
         self._track_window = TrackManagerWindow(self._list_panel, self)
         self._track_window.set_visibility_hook(self._on_track_window_visible)
 
@@ -179,6 +218,23 @@ class MainWindow(QMainWindow):
         self._data_panel.frame_activated.connect(self._show_frame)
         self._chart_panel = TrackChartPanel()
         self._chart_panel.frame_activated.connect(self._show_frame)
+        self._chart_panel.velocity_step_changed.connect(self._refresh_track_ui)
+        self._assistant_panel = AssistantPanel()
+        self._assistant_panel.analyze_requested.connect(self._analyze_experiment)
+        self._assistant_panel.confirm_requested.connect(self._confirm_experiment)
+        self._assistant_panel.send_requested.connect(self._send_assistant_chat)
+        self._assistant_panel.stop_requested.connect(self._cancel_assistant)
+        self._assistant_panel.report_requested.connect(self._generate_assistant_report)
+        self._assistant_panel.export_requested.connect(self._export_assistant_report)
+        self._assistant_panel.copy_report_requested.connect(self._copy_assistant_report)
+        self._assistant_panel.preview_requested.connect(self._preview_assistant_payload)
+        self._assistant_panel.clear_chat_requested.connect(self._clear_assistant_chat)
+        self._assistant_panel.level_changed.connect(self._on_teaching_level)
+        self._assistant_panel.settings_requested.connect(self._open_deepseek_settings)
+        self._assistant_panel.length_changed.connect(self._on_pendulum_length)
+        self._assistant_window = AssistantWindow(self._assistant_panel, self)
+        self._assistant_window.setStyleSheet(self.styleSheet())
+        self._assistant_window.visibility_changed.connect(self._on_assistant_window_visible)
         self._workspace = DockWorkspace(self._stage, self._chart_panel, self._data_panel)
         self._data_column = self._workspace.data_dock
         self._workspace.chart_visibility_changed.connect(self._on_chart_dock_visible)
@@ -214,6 +270,7 @@ class MainWindow(QMainWindow):
         self._slider.valueChanged.connect(self._on_slider_value)
         self._slider.sliderReleased.connect(self._on_slider_released)
         self._slider.loop_range_changed.connect(self._on_loop_range_changed)
+        self._slider.loop_marker_moved.connect(self._on_loop_marker_moved)
 
         toolbar = self._build_toolbar()
         self._video.zoom_changed.connect(self._on_zoom_changed)
@@ -290,6 +347,7 @@ class MainWindow(QMainWindow):
 
         self._build_menu()
         self._restore_window_prefs()
+        self._restore_track_mode()
         self._refresh_track_ui()
 
     def _icon_button(self, icon, tooltip: str, slot) -> QPushButton:
@@ -317,7 +375,7 @@ class MainWindow(QMainWindow):
             ("ruler", "标定尺", self._start_ruler_tool),
             ("axis", "坐标系：点击工具或双击坐标轴进入编辑", self._start_axis_tool),
             ("track", "轨迹", self._toggle_track_window),
-            ("ai", "SAM 自动跟踪", self._start_or_cancel_ai_track),
+            ("ai", "AI 助手", self._show_assistant_panel),
             ("view", "显示选项", self._toggle_overlays),
             ("zoom", "滚轮缩放，点击还原", self._reset_zoom),
         ]
@@ -406,7 +464,9 @@ class MainWindow(QMainWindow):
         self._redo_action.setEnabled(False)
         self._redo_action.triggered.connect(self._redo)
         edit_menu.addAction(self._redo_action)
-        self._add_placeholders(edit_menu, ["首选项"])
+        settings_action = QAction("DeepSeek 设置…", self)
+        settings_action.triggered.connect(self._open_deepseek_settings)
+        edit_menu.addAction(settings_action)
 
         play_menu = self.menuBar().addMenu("视频")
         play_action = QAction("播放/暂停", self)
@@ -436,15 +496,30 @@ class MainWindow(QMainWindow):
         play_menu.addAction(reset_loop)
 
         track_menu = self.menuBar().addMenu("轨迹")
-        self._ai_track_action = QAction("SAM 自动跟踪", self)
+        self._ai_track_action = QAction("自动跟踪", self)
         self._ai_track_action.setShortcut(Qt.Key.Key_T)
         self._ai_track_action.setEnabled(False)
         self._ai_track_action.triggered.connect(self._start_or_cancel_ai_track)
         track_menu.addAction(self._ai_track_action)
-        self._cancel_ai_action = QAction("取消 AI 任务", self)
+        self._cancel_ai_action = QAction("取消跟踪", self)
         self._cancel_ai_action.setEnabled(False)
         self._cancel_ai_action.triggered.connect(self._cancel_ai_track)
         track_menu.addAction(self._cancel_ai_action)
+        mode_menu = track_menu.addMenu("跟踪模式")
+        self._mode_group = QActionGroup(self)
+        self._mode_group.setExclusive(True)
+        self._fast_mode_action = QAction("快速", self)
+        self._fast_mode_action.setCheckable(True)
+        self._fast_mode_action.setChecked(True)
+        self._fast_mode_action.setData(TrackMode.FAST.value)
+        self._precise_mode_action = QAction("精准", self)
+        self._precise_mode_action.setCheckable(True)
+        self._precise_mode_action.setData(TrackMode.PRECISE.value)
+        self._mode_group.addAction(self._fast_mode_action)
+        self._mode_group.addAction(self._precise_mode_action)
+        mode_menu.addAction(self._fast_mode_action)
+        mode_menu.addAction(self._precise_mode_action)
+        self._mode_group.triggered.connect(self._on_mode_action)
         new_track = track_menu.addAction("新建轨迹")
         new_track.triggered.connect(self._new_track)
         mgr = track_menu.addAction("轨迹管理器")
@@ -501,11 +576,24 @@ class MainWindow(QMainWindow):
                 clear_cal = menu.addAction("清除标定")
                 clear_cal.triggered.connect(self._clear_calibration)
             elif title == "AI助手":
-                auto = menu.addAction("自动识别目标")
-                auto.triggered.connect(self._start_or_cancel_ai_track)
-                self._ai_assist_action = auto
-                auto.setEnabled(False)
-                self._add_placeholders(menu, ["运动分析", "生成报告"])
+                self._ai_panel_action = QAction("显示面板", self)
+                self._ai_panel_action.setCheckable(True)
+                self._ai_panel_action.toggled.connect(self._set_assistant_visible)
+                menu.addAction(self._ai_panel_action)
+                self._ai_analyze_action = QAction("识别实验", self)
+                self._ai_analyze_action.triggered.connect(self._analyze_experiment)
+                menu.addAction(self._ai_analyze_action)
+                motion = QAction("运动分析", self)
+                motion.triggered.connect(self._analyze_experiment)
+                menu.addAction(motion)
+                self._ai_report_action = QAction("生成报告", self)
+                self._ai_report_action.triggered.connect(self._generate_assistant_report)
+                menu.addAction(self._ai_report_action)
+                menu.addSeparator()
+                menu.addAction("DeepSeek 设置…").triggered.connect(self._open_deepseek_settings)
+                self._ai_assist_action = self._ai_panel_action
+                self._ai_analyze_action.setEnabled(False)
+                self._ai_report_action.setEnabled(False)
             elif title == "窗口":
                 self._track_window_action = QAction("轨迹管理器", self)
                 self._track_window_action.setCheckable(True)
@@ -521,6 +609,10 @@ class MainWindow(QMainWindow):
                 self._table_action.setChecked(True)
                 self._table_action.toggled.connect(self._workspace.set_data_visible)
                 menu.addAction(self._table_action)
+                self._assistant_window_action = QAction("AI 助手", self)
+                self._assistant_window_action.setCheckable(True)
+                self._assistant_window_action.toggled.connect(self._set_assistant_visible)
+                menu.addAction(self._assistant_window_action)
                 menu.addSeparator()
                 menu.addAction("分图归位").triggered.connect(self._workspace.dock_chart)
                 menu.addAction("数据表归位").triggered.connect(self._workspace.dock_data)
@@ -540,10 +632,13 @@ class MainWindow(QMainWindow):
         self._save_window_prefs()
         self._pause()
         self._stop_ai()
+        self._stop_assistant()
         self._stop_shake()
         self._stop_pump()
         if self._track_window is not None:
             self._track_window.hide()
+        if getattr(self, "_assistant_window", None) is not None:
+            self._assistant_window.hide()
         if self._cal_dialog is not None:
             self._cal_dialog.hide()
         super().closeEvent(event)
@@ -596,6 +691,7 @@ class MainWindow(QMainWindow):
         had_video = self._info is not None
         self._pause()
         self._stop_ai()
+        self._stop_assistant()
         self._stop_shake()
         self._stop_pump()
         self._info = None
@@ -605,6 +701,7 @@ class MainWindow(QMainWindow):
         self._pending_project = None
         self._shake = None
         self._calibration = CalibrationState()
+        self._reset_assistant_state()
         self._pending_rulers = None
         self._axis_undo_pushed = False
         self._cal_drawn_before_shake = False
@@ -630,6 +727,7 @@ class MainWindow(QMainWindow):
         path = path.expanduser().resolve()
         self._pause()
         self._stop_ai()
+        self._stop_assistant()
         self._stop_shake()
         self._stop_pump()
         self._info = None
@@ -699,9 +797,12 @@ class MainWindow(QMainWindow):
             self._contour_action.setChecked(self._show_contours)
             self._prompt_action.setChecked(self._show_prompts)
             self._cal_overlay_action.setChecked(self._show_calibration)
+            self._restore_assistant_from_project(self._pending_project)
+            self._apply_track_mode(self._pending_project.track_mode, persist=False)
             self._pending_project = None
         elif not self._tracks:
             self._new_track()
+            self._reset_assistant_state()
         self._video_info.set_info(info)
         self._refresh_track_ui()
         self.statusBar().showMessage(
@@ -738,10 +839,10 @@ class MainWindow(QMainWindow):
         self._loop_btn.setEnabled(enabled)
         self._speed.setEnabled(enabled)
         self._ai_track_action.setEnabled(enabled)
-        self._ai_assist_action.setEnabled(enabled)
         self._shake_action.setEnabled(enabled)
         self._save_action.setEnabled(enabled)
         self._set_cache_actions_enabled(enabled)
+        self._sync_assistant_actions()
 
     def _set_cache_actions_enabled(self, enabled: bool) -> None:
         self._close_action.setEnabled(enabled)
@@ -846,6 +947,12 @@ class MainWindow(QMainWindow):
         if self._info is None:
             return
         self.statusBar().showMessage(f"循环范围：帧 {start + 1} – {end + 1}", 3000)
+
+    def _on_loop_marker_moved(self, frame: int) -> None:
+        if self._info is None:
+            return
+        self._pause()
+        self._show_frame(frame)
 
     def _mark_loop(self, which: str) -> None:
         if self._info is None:
@@ -1041,6 +1148,17 @@ class MainWindow(QMainWindow):
         self._table_action.setChecked(visible)
         self._table_action.blockSignals(False)
 
+    def _on_assistant_window_visible(self, visible: bool) -> None:
+        for action in (
+            getattr(self, "_ai_panel_action", None),
+            getattr(self, "_assistant_window_action", None),
+        ):
+            if action is None:
+                continue
+            action.blockSignals(True)
+            action.setChecked(visible)
+            action.blockSignals(False)
+
     def _on_position_edited(self, x: float, y: float) -> None:
         layer = self._active_layer()
         if layer is None or layer.result is None:
@@ -1167,7 +1285,7 @@ class MainWindow(QMainWindow):
             self._list_panel.set_hint("请先 Control 拖动框选目标，或 Shift+Control 点击加点")
             self.statusBar().showMessage("请先框选或加点，再开始跟踪", 5000)
             return
-        if not self._ensure_sam_runtime():
+        if self._track_mode is TrackMode.PRECISE and not self._ensure_sam_runtime():
             return
         self._push_undo()
         seed_prompt = next(
@@ -1192,14 +1310,19 @@ class MainWindow(QMainWindow):
             start_frame=start,
             end_frame=end,
             prompts=layer.prompts,
+            tracker=create_tracker(self._track_mode),
         )
         self._ai_thread = thread
         self._ai_worker = worker
         self._cancel_ai_action.setEnabled(True)
-        self._ai_track_action.setText("取消 SAM 跟踪")
+        self._ai_track_action.setText("取消跟踪")
         self._list_panel.set_running(True)
+        self._set_mode_widgets_enabled(False)
         self._sync_undo_actions()
-        self.statusBar().showMessage("SAM 2 跟踪进行中…（独立线程，不占用播放解码）")
+        if self._track_mode is TrackMode.PRECISE:
+            self.statusBar().showMessage("精准跟踪进行中…（SAM 2.1 Tiny，独立线程）")
+        else:
+            self.statusBar().showMessage("快速跟踪进行中…（模板匹配，独立线程）")
         thread.start()
 
     def _ensure_sam_runtime(self) -> bool:
@@ -1211,7 +1334,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "未安装 SAM 2",
-                "桌面跟踪需要 PyTorch 与 SAM 2。\n请执行：pip install -r requirements-ai.txt",
+                "精准模式需要 PyTorch 与 SAM 2。\n"
+                "请在项目目录执行：\n"
+                ".venv/bin/python -m pip install -r requirements-ai.txt",
             )
             return False
         from ai.model_manager import ModelNotAvailable, checkpoint_path, ensure_checkpoint
@@ -1258,9 +1383,12 @@ class MainWindow(QMainWindow):
         self._ai_thread = None
         self._ai_worker = None
         self._cancel_ai_action.setEnabled(False)
-        self._ai_track_action.setText("SAM 自动跟踪")
+        self._ai_track_action.setText("自动跟踪")
         self._list_panel.set_running(False)
+        self._set_mode_widgets_enabled(True)
         self._sync_undo_actions()
+        if getattr(self, "_assistant_panel", None) is not None:
+            self._sync_assistant()
 
     def _stop_shake(self) -> None:
         if self._shake_worker is not None:
@@ -1275,7 +1403,7 @@ class MainWindow(QMainWindow):
         if self._info is None:
             return
         if self._ai_worker is not None:
-            self.statusBar().showMessage("请等待 SAM 跟踪完成后再做背景补偿", 4000)
+            self.statusBar().showMessage("请等待跟踪完成后再做背景补偿", 4000)
             return
         self._start_shake()
 
@@ -1353,7 +1481,7 @@ class MainWindow(QMainWindow):
     def _on_ai_progress(self, event: ProgressEvent) -> None:
         self._list_panel.set_progress(event.current, event.total)
         self.statusBar().showMessage(
-            f"SAM 跟踪 {event.current} / {event.total}", 800
+            f"跟踪 {event.current} / {event.total}", 800
         )
 
     def _on_ai_finished(self, result: TrackResult) -> None:
@@ -1405,9 +1533,9 @@ class MainWindow(QMainWindow):
             layer.status = "error"
         self._stop_ai()
         self._refresh_track_ui()
-        self.statusBar().showMessage(message or "SAM 跟踪失败", 8000)
+        self.statusBar().showMessage(message or "跟踪失败", 8000)
         if message:
-            QMessageBox.warning(self, "SAM 2 跟踪失败", message)
+            QMessageBox.warning(self, "跟踪失败", message)
 
     def _apply_track_overlay(self, index: int | None = None) -> None:
         overlays: list[OverlayTrack] = []
@@ -1453,7 +1581,12 @@ class MainWindow(QMainWindow):
         self._view_bar.set_tracks(self._tracks, self._active_id)
         layer = self._active_layer()
         analyzed = self._analysis_result(layer)
-        samples = series_for_result(analyzed, self._info, calibration=self._calibration)
+        samples = series_for_result(
+            analyzed,
+            self._info,
+            calibration=self._calibration,
+            velocity_step=self._chart_panel.velocity_step,
+        )
         self._data_panel.set_units(
             self._calibration.position_unit, self._calibration.speed_unit
         )
@@ -1474,11 +1607,15 @@ class MainWindow(QMainWindow):
         if self._info is not None:
             self._chart_panel.highlight_frame(self._index)
             self._data_panel.highlight_frame(self._index)
+        self._sync_assistant()
 
     def _sync_view_bar(self) -> None:
         layer = self._active_layer()
         samples = series_for_result(
-            self._analysis_result(layer), self._info, calibration=self._calibration
+            self._analysis_result(layer),
+            self._info,
+            calibration=self._calibration,
+            velocity_step=self._chart_panel.velocity_step,
         )
         sample = sample_at_frame(samples, self._index)
         self._view_bar.set_sample(sample)
@@ -1523,6 +1660,7 @@ class MainWindow(QMainWindow):
             self._chart_action.setChecked(True)
         if getattr(self, "_table_action", None) is not None:
             self._table_action.setChecked(True)
+        self._set_assistant_visible(False)
         self._toggle_track_window()
 
     def _reset_zoom(self, *_args) -> None:
@@ -1569,6 +1707,7 @@ class MainWindow(QMainWindow):
             analyzed if analyzed is not None else layer.result,
             self._info,
             calibration=self._calibration,
+            velocity_step=self._chart_panel.velocity_step,
         )
         self.statusBar().showMessage(f"已导出 CSV {dest}", 4000)
 
@@ -1584,19 +1723,29 @@ class MainWindow(QMainWindow):
         if dest.suffix.lower() != ".json":
             dest = dest.with_suffix(".json")
         active = self._active_layer()
+        if self._track_mode is TrackMode.PRECISE:
+            model_name = DEFAULT_SPEC.model_id
+            model_version = DEFAULT_SPEC.version
+            model_license = DEFAULT_SPEC.license
+        else:
+            model_name = "tracker_autotracker"
+            model_version = "1.0.0"
+            model_license = ""
         write_track_project(
             dest,
             self._info.path,
             None if active is None else active.result,
             tracks=self._tracks,
             active_track_id=self._active_id,
-            model_name=DEFAULT_SPEC.model_id,
-            model_version=DEFAULT_SPEC.version,
-            model_license=DEFAULT_SPEC.license,
+            model_name=model_name,
+            model_version=model_version,
+            model_license=model_license,
             show_contours=self._show_contours,
             show_prompts=self._show_prompts,
             show_calibration=self._show_calibration,
             calibration=self._calibration,
+            assistant=self._assistant_state,
+            track_mode=self._track_mode,
         )
         self.statusBar().showMessage(f"已保存项目 {dest}", 4000)
 
@@ -1935,6 +2084,48 @@ class MainWindow(QMainWindow):
             self._chart_action.setChecked(self._workspace.chart_visible)
         if getattr(self, "_table_action", None) is not None:
             self._table_action.setChecked(self._workspace.data_visible)
+        geo_asst = settings.value("assistant/geometry")
+        if isinstance(geo_asst, QByteArray) and not geo_asst.isEmpty():
+            self._assistant_window.restoreGeometry(geo_asst)
+            if not _on_screen(self._assistant_window.frameGeometry()):
+                self._assistant_window.resize(960, 720)
+                self._assistant_window.move(120, 80)
+        self._load_assistant_prefs(settings)
+
+    def _restore_track_mode(self) -> None:
+        mode = TrackMode.FAST
+        if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+            raw = QSettings().value("track/mode", TrackMode.FAST.value)
+            try:
+                mode = TrackMode(str(raw))
+            except ValueError:
+                mode = TrackMode.FAST
+        self._apply_track_mode(mode, persist=False)
+
+    def _on_list_mode_changed(self, mode: str) -> None:
+        self._apply_track_mode(mode)
+
+    def _on_mode_action(self, action: QAction) -> None:
+        self._apply_track_mode(str(action.data() or TrackMode.FAST.value))
+
+    def _apply_track_mode(self, mode: TrackMode | str, *, persist: bool = True) -> None:
+        try:
+            resolved = TrackMode(mode)
+        except ValueError:
+            resolved = TrackMode.FAST
+        self._track_mode = resolved
+        self._list_panel.set_track_mode(resolved.value)
+        if getattr(self, "_fast_mode_action", None) is not None:
+            self._fast_mode_action.setChecked(resolved is TrackMode.FAST)
+            self._precise_mode_action.setChecked(resolved is TrackMode.PRECISE)
+        if persist and os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+            QSettings().setValue("track/mode", resolved.value)
+
+    def _set_mode_widgets_enabled(self, enabled: bool) -> None:
+        self._list_panel.set_mode_enabled(enabled)
+        if getattr(self, "_fast_mode_action", None) is not None:
+            self._fast_mode_action.setEnabled(enabled)
+            self._precise_mode_action.setEnabled(enabled)
 
     def _save_window_prefs(self) -> None:
         if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
@@ -1942,6 +2133,499 @@ class MainWindow(QMainWindow):
         settings = QSettings()
         settings.setValue("main/geometry", self.saveGeometry())
         self._workspace.save_prefs(settings)
+        settings.setValue("assistant/geometry", self._assistant_window.saveGeometry())
+        settings.setValue("assistant/chat_model", self._chat_model)
+        settings.setValue("assistant/report_model", self._report_model)
+        settings.setValue("assistant/teaching_level", self._assistant_state.teaching_level.value)
+        settings.setValue("track/mode", self._track_mode.value)
+
+    def _load_assistant_prefs(self, settings: QSettings) -> None:
+        chat = settings.value("assistant/chat_model", DEFAULT_CHAT_MODEL)
+        report = settings.value("assistant/report_model", DEFAULT_REPORT_MODEL)
+        level = settings.value("assistant/teaching_level", TeachingLevel.HIGH.value)
+        if isinstance(chat, str) and chat.strip():
+            self._chat_model = chat.strip()
+        if isinstance(report, str) and report.strip():
+            self._report_model = report.strip()
+        try:
+            self._assistant_state.teaching_level = TeachingLevel(str(level))
+        except ValueError:
+            self._assistant_state.teaching_level = TeachingLevel.HIGH
+        self._assistant_panel.set_teaching_level(self._assistant_state.teaching_level)
+        self._assistant_panel.set_models(self._chat_model, self._report_model)
+
+    def _set_assistant_visible(self, visible: bool) -> None:
+        if visible:
+            self._assistant_window.show()
+            self._assistant_window.raise_()
+            self._assistant_window.activateWindow()
+        else:
+            self._assistant_window.hide()
+
+    def _show_assistant_panel(self, *_args) -> None:
+        self._set_assistant_visible(True)
+
+    def _assistant_dialog_parent(self) -> QWidget:
+        if self._assistant_window.isVisible():
+            return self._assistant_window
+        return self
+
+    def _reset_assistant_state(self) -> None:
+        level = self._assistant_state.teaching_level
+        self._assistant_state = AssistantState(teaching_level=level)
+        self._assistant_panel.clear_chat()
+        self._assistant_panel.set_report("")
+        self._assistant_panel.set_analysis(None, None)
+        self._assistant_panel.set_stale(False)
+        self._assistant_panel.set_pendulum_length(None)
+
+    def _restore_assistant_from_project(self, doc) -> None:  # noqa: ANN001
+        self._assistant_state = doc.assistant or AssistantState()
+        current = self._current_fingerprint()
+        if self._assistant_state.fingerprint and self._assistant_state.fingerprint != current:
+            self._assistant_state.stale = True
+        self._assistant_panel.set_teaching_level(self._assistant_state.teaching_level)
+        self._assistant_panel.set_pendulum_length(self._assistant_state.pendulum_length_m)
+        self._assistant_panel.clear_chat()
+        for message in self._assistant_state.messages:
+            if message.role == "user":
+                self._assistant_panel.add_user_message(message.content)
+            else:
+                self._assistant_panel.begin_assistant_message(
+                    live=False, reasoning=message.reasoning
+                )
+                self._assistant_panel.finish_assistant_message(
+                    message.content, cancelled=message.cancelled
+                )
+        self._assistant_panel.set_report(self._assistant_state.report_markdown)
+        self._assistant_panel.set_analysis(
+            self._assistant_state.analysis, self._assistant_state.confirmed_type
+        )
+
+    def _shake_offsets(self) -> tuple[tuple[float, float], ...]:
+        if self._shake is None or self._info is None:
+            return ()
+        last = max(self._info.frame_count - 1, 0)
+        return (self._shake.offset(0), self._shake.offset(last))
+
+    def _current_fingerprint(self) -> str:
+        layer = self._active_layer()
+        return source_fingerprint(
+            self._analysis_result(layer),
+            self._info,
+            self._calibration,
+            shake_enabled=self._shake_enabled,
+            shake_offsets=self._shake_offsets(),
+            pendulum_length_m=self._assistant_state.pendulum_length_m,
+        )
+
+    def _sync_assistant(self) -> None:
+        layer = self._active_layer()
+        analyzed = self._analysis_result(layer)
+        visible = 0 if analyzed is None else sum(1 for point in analyzed.points if point.visible)
+        current = self._current_fingerprint()
+        if (
+            self._assistant_state.fingerprint
+            and self._assistant_state.fingerprint != current
+        ):
+            self._assistant_state.stale = True
+        self._assistant_panel.set_stale(self._assistant_state.stale)
+        self._assistant_panel.set_models(self._chat_model, self._report_model)
+        self._assistant_panel.set_readiness(
+            has_video=self._info is not None,
+            visible_points=visible,
+            calibrated=self._calibration.active,
+            shake_on=self._shake_enabled and self._shake is not None,
+            has_key=has_api_key(),
+            sam_running=self._ai_worker is not None,
+            confirmed=self._assistant_state.confirmed_type is not None
+            and not self._assistant_state.stale,
+        )
+        self._assistant_panel.set_analysis(
+            self._assistant_state.analysis, self._assistant_state.confirmed_type
+        )
+        self._sync_assistant_actions()
+
+    def _sync_assistant_actions(self) -> None:
+        layer = self._active_layer()
+        analyzed = self._analysis_result(layer)
+        visible = 0 if analyzed is None else sum(1 for point in analyzed.points if point.visible)
+        sam = self._ai_worker is not None
+        can_analyze = self._info is not None and visible >= 6 and not sam and not self._assistant_busy
+        confirmed = (
+            self._assistant_state.confirmed_type is not None and not self._assistant_state.stale
+        )
+        if getattr(self, "_ai_analyze_action", None) is not None:
+            self._ai_analyze_action.setEnabled(can_analyze)
+        if getattr(self, "_ai_report_action", None) is not None:
+            self._ai_report_action.setEnabled(
+                confirmed and has_api_key() and not sam and not self._assistant_busy
+            )
+
+    def _assistant_samples(self):
+        layer = self._active_layer()
+        return series_for_result(
+            self._analysis_result(layer),
+            self._info,
+            calibration=self._calibration,
+            velocity_step=self._chart_panel.velocity_step,
+        )
+
+    def _teaching_context(self) -> dict:
+        return build_teaching_context(
+            self._assistant_state.analysis,
+            confirmed_type=self._assistant_state.confirmed_type,
+            samples=self._assistant_samples(),
+            teaching_level=self._assistant_state.teaching_level,
+            pendulum_length_m=self._assistant_state.pendulum_length_m,
+            stale=self._assistant_state.stale,
+        )
+
+    def _analyze_experiment(self, *_args) -> None:
+        self._set_assistant_visible(True)
+        if self._ai_worker is not None:
+            message = "请等待跟踪完成后再分析"
+            self._assistant_panel.set_notice(message)
+            self.statusBar().showMessage(message, 4000)
+            return
+        if self._assistant_busy:
+            message = "请先停止当前助手任务"
+            self._assistant_panel.set_notice(message)
+            self.statusBar().showMessage(message, 3000)
+            return
+        layer = self._active_layer()
+        analyzed = self._analysis_result(layer)
+        if self._info is None or analyzed is None:
+            message = "需要先打开视频并完成轨迹，才能识别实验。"
+            self._assistant_panel.set_notice(message)
+            self.statusBar().showMessage(message, 4000)
+            return
+        visible = sum(1 for point in analyzed.points if point.visible)
+        if visible < 6:
+            message = f"可见轨迹点只有 {visible} 个，至少需要 6 个才能识别。"
+            self._assistant_panel.set_notice(message)
+            self.statusBar().showMessage(message, 4000)
+            return
+        self._assistant_panel.set_notice("正在用本地轨迹识别实验…")
+        self._start_assistant_job(
+            AssistantJob(
+                kind="analyze",
+                track=analyzed,
+                info=self._info,
+                calibration=self._calibration,
+                shake_enabled=self._shake_enabled,
+                shake_offsets=self._shake_offsets(),
+                clip_id=analyzed.clip_id,
+                pendulum_length_m=self._assistant_state.pendulum_length_m,
+                period_hint=True,
+            )
+        )
+
+    def _confirm_experiment(self, type_value: str) -> None:
+        try:
+            kind = ExperimentType(type_value)
+        except ValueError:
+            return
+        analysis = self._assistant_state.analysis
+        if analysis is None:
+            self._analyze_experiment()
+            return
+        match = next((item for item in analysis.candidates if item.experiment_type is kind), None)
+        if match is None:
+            self._start_assistant_job(
+                AssistantJob(
+                    kind="analyze",
+                    track=self._analysis_result(self._active_layer()),
+                    info=self._info,
+                    calibration=self._calibration,
+                    shake_enabled=self._shake_enabled,
+                    shake_offsets=self._shake_offsets(),
+                    clip_id="" if self._info is None else self._info.path.name,
+                    pendulum_length_m=self._assistant_state.pendulum_length_m,
+                    force_type=kind,
+                )
+            )
+            self._assistant_state.confirmed_type = kind
+            return
+        analysis.selected = match
+        self._assistant_state.confirmed_type = kind
+        self._assistant_state.stale = False
+        self._assistant_state.fingerprint = analysis.fingerprint or self._current_fingerprint()
+        self._sync_assistant()
+        self.statusBar().showMessage(f"已确认实验：{match.label}", 4000)
+
+    def _send_assistant_chat(self, text: str) -> None:
+        if not has_api_key():
+            warn_missing_key(self._assistant_dialog_parent())
+            return
+        if self._assistant_busy:
+            return
+        self._set_assistant_visible(True)
+        self._assistant_state.messages.append(ChatMessage(role="user", content=text))
+        self._assistant_panel.add_user_message(text)
+        self._assistant_panel.begin_assistant_message()
+        context = self._teaching_context()
+        try:
+            assert_private_context(context)
+        except ValueError:
+            context = {key: value for key, value in context.items() if key not in {"path", "video_path"}}
+        self._start_assistant_job(
+            AssistantJob(
+                kind="chat",
+                api_key=get_api_key() or "",
+                chat_model=self._chat_model,
+                report_model=self._report_model,
+                messages=chat_messages(
+                    context,
+                    self._assistant_state.messages[:-1],
+                    text,
+                    teaching_level=self._assistant_state.teaching_level,
+                ),
+                stream=True,
+                transport=self._assistant_transport,
+            )
+        )
+
+    def _generate_assistant_report(self, *_args) -> None:
+        if self._ai_worker is not None:
+            self.statusBar().showMessage("请等待跟踪完成后再生成报告", 4000)
+            return
+        if self._assistant_state.confirmed_type is None:
+            self.statusBar().showMessage("请先确认实验类型", 4000)
+            return
+        if not has_api_key():
+            markdown = render_report_markdown(
+                self._assistant_state.analysis,
+                confirmed_type=self._assistant_state.confirmed_type,
+                teaching_level=self._assistant_state.teaching_level,
+                stale=self._assistant_state.stale,
+            )
+            self._assistant_state.report_markdown = markdown
+            self._assistant_panel.set_report(markdown)
+            warn_missing_key(self._assistant_dialog_parent())
+            return
+        if self._assistant_busy:
+            return
+        context = self._teaching_context()
+        self._start_assistant_job(
+            AssistantJob(
+                kind="report",
+                api_key=get_api_key() or "",
+                chat_model=self._chat_model,
+                report_model=self._report_model,
+                messages=report_messages(
+                    context, teaching_level=self._assistant_state.teaching_level
+                ),
+                json_mode=True,
+                transport=self._assistant_transport,
+            )
+        )
+
+    def _export_assistant_report(self) -> None:
+        markdown = self._assistant_state.report_markdown or build_assistant_report(
+            self._assistant_state
+        )
+        if not markdown.strip():
+            self.statusBar().showMessage("还没有可导出的报告", 3000)
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "导出实验报告", "", "Markdown (*.md)")
+        if not path:
+            return
+        export_assistant_report(Path(path), markdown)
+        self.statusBar().showMessage("已导出 Markdown 报告", 4000)
+
+    def _copy_assistant_report(self) -> None:
+        text = self._assistant_state.report_markdown or self._assistant_panel.report_text()
+        QApplication.clipboard().setText(text or "")
+        self.statusBar().showMessage("已复制报告", 2500)
+
+    def _preview_assistant_payload(self) -> None:
+        payload = preview_payload(self._teaching_context())
+        show_payload_preview(self._assistant_dialog_parent(), payload)
+
+    def _clear_assistant_chat(self) -> None:
+        self._assistant_state.messages = []
+        self._assistant_panel.clear_chat()
+
+    def _on_teaching_level(self, value: str) -> None:
+        try:
+            self._assistant_state.teaching_level = TeachingLevel(value)
+        except ValueError:
+            self._assistant_state.teaching_level = TeachingLevel.HIGH
+
+    def _on_pendulum_length(self, value: float) -> None:
+        self._assistant_state.pendulum_length_m = None if value <= 0 else float(value)
+        if self._assistant_state.fingerprint:
+            self._assistant_state.stale = True
+        self._sync_assistant()
+
+    def _open_deepseek_settings(self, *_args) -> None:
+        dialog = DeepSeekSettingsDialog(
+            self._assistant_dialog_parent(),
+            chat_model=self._chat_model,
+            report_model=self._report_model,
+            teaching_level=self._assistant_state.teaching_level,
+        )
+        if dialog.exec():
+            self._chat_model = dialog.chat_model()
+            self._report_model = dialog.report_model()
+            self._assistant_state.teaching_level = dialog.teaching_level()
+            self._assistant_panel.set_teaching_level(self._assistant_state.teaching_level)
+            self._assistant_panel.set_models(self._chat_model, self._report_model)
+            self._sync_assistant()
+            if dialog.test_requested:
+                self._test_deepseek_key()
+
+    def _test_deepseek_key(self) -> None:
+        if not has_api_key():
+            warn_missing_key(self._assistant_dialog_parent())
+            return
+        self._start_assistant_job(
+            AssistantJob(
+                kind="test_key",
+                api_key=get_api_key() or "",
+                chat_model=self._chat_model,
+                messages=[
+                    {"role": "system", "content": "只回复 ok。"},
+                    {"role": "user", "content": "ping json"},
+                ],
+                transport=self._assistant_transport,
+            )
+        )
+
+    def _start_assistant_job(self, job: AssistantJob) -> None:
+        if self._assistant_busy:
+            self.statusBar().showMessage("请先停止当前助手任务", 3000)
+            return
+        self._stop_assistant()
+        thread, worker = run_assistant_in_thread(
+            job,
+            on_chunk=self._on_assistant_chunk,
+            on_reasoning=self._on_assistant_reasoning,
+            on_finished=self._on_assistant_finished,
+            on_failed=self._on_assistant_failed,
+            on_cancelled=self._on_assistant_cancelled,
+            on_usage=self._on_assistant_usage,
+        )
+        self._assistant_thread = thread
+        self._assistant_worker = worker
+        self._assistant_busy = True
+        self._assistant_panel.set_busy(True)
+        self._sync_assistant_actions()
+        thread.start()
+
+    def _cancel_assistant(self) -> None:
+        if self._assistant_worker is not None:
+            self._assistant_worker.cancel()
+            self.statusBar().showMessage("正在停止助手…", 2500)
+
+    def _release_assistant_thread(self) -> None:
+        thread = self._assistant_thread
+        self._assistant_thread = None
+        self._assistant_worker = None
+        self._assistant_busy = False
+        if getattr(self, "_assistant_panel", None) is not None:
+            self._assistant_panel.set_busy(False)
+        if thread is not None:
+            thread.quit()
+            thread.wait(5000)
+
+    def _stop_assistant(self) -> None:
+        if self._assistant_worker is not None:
+            self._assistant_worker.cancel()
+        self._release_assistant_thread()
+
+    def _on_assistant_chunk(self, text: str) -> None:
+        self._assistant_panel.append_chunk(text)
+
+    def _on_assistant_reasoning(self, text: str) -> None:
+        self._assistant_panel.append_reasoning(text)
+
+    def _on_assistant_usage(self, usage: dict) -> None:
+        self._assistant_state.token_usage = {
+            str(key): int(value) for key, value in usage.items()
+        }
+
+    def _on_assistant_cancelled(self) -> None:
+        self._release_assistant_thread()
+        self._sync_assistant_actions()
+
+    def _on_assistant_failed(self, message: str) -> None:
+        self._release_assistant_thread()
+        self._sync_assistant_actions()
+        self._assistant_panel.set_notice(message or "助手请求失败")
+        self._assistant_panel.finish_assistant_message(message or "助手请求失败")
+        self.statusBar().showMessage(message or "助手请求失败", 8000)
+        if message:
+            QMessageBox.warning(self._assistant_dialog_parent(), "AI 助手", message)
+
+    def _on_assistant_finished(self, outcome: object) -> None:
+        if not isinstance(outcome, AssistantOutcome):
+            return
+        self._release_assistant_thread()
+        self._sync_assistant_actions()
+        if outcome.usage:
+            self._assistant_state.token_usage = outcome.usage
+        if outcome.kind == "analyze":
+            self._assistant_state.analysis = outcome.analysis
+            self._assistant_state.fingerprint = (
+                outcome.analysis.fingerprint if outcome.analysis is not None else self._current_fingerprint()
+            )
+            self._assistant_state.stale = False
+            if outcome.analysis is not None and outcome.analysis.auto_confirmable and outcome.analysis.selected:
+                self._assistant_state.confirmed_type = outcome.analysis.selected.experiment_type
+            elif self._assistant_state.confirmed_type is not None and outcome.analysis is not None:
+                match = next(
+                    (
+                        item
+                        for item in outcome.analysis.candidates
+                        if item.experiment_type is self._assistant_state.confirmed_type
+                    ),
+                    None,
+                )
+                if match is not None:
+                    outcome.analysis.selected = match
+            self._sync_assistant()
+            self._assistant_panel.add_analysis_result(outcome.analysis)
+            self._assistant_panel.set_notice("本地识别完成，结果已写在对话里，也可在左侧查看。")
+            self.statusBar().showMessage("本地实验识别完成", 4000)
+            return
+        if outcome.kind == "chat":
+            self._assistant_panel.finish_assistant_message(outcome.text, cancelled=outcome.cancelled)
+            self._assistant_state.messages.append(
+                ChatMessage(
+                    role="assistant",
+                    content=outcome.text,
+                    cancelled=outcome.cancelled,
+                    reasoning=outcome.reasoning,
+                )
+            )
+            if outcome.cancelled:
+                self.statusBar().showMessage("生成已取消", 3000)
+            self._sync_assistant()
+            return
+        if outcome.kind == "report":
+            sections = merge_report_sections(outcome.json_data)
+            self._assistant_state.report_sections = sections
+            self._assistant_state.model_id = outcome.model
+            self._assistant_state.generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+            markdown = render_report_markdown(
+                self._assistant_state.analysis,
+                confirmed_type=self._assistant_state.confirmed_type,
+                sections=sections,
+                teaching_level=self._assistant_state.teaching_level,
+                generated_at=self._assistant_state.generated_at,
+                model_id=outcome.model,
+                stale=self._assistant_state.stale,
+            )
+            self._assistant_state.report_markdown = markdown
+            self._assistant_panel.set_report(markdown)
+            self.statusBar().showMessage("报告已生成", 4000)
+            self._sync_assistant()
+            return
+        if outcome.kind == "test_key":
+            self.statusBar().showMessage("DeepSeek 连接正常", 4000)
+            self._sync_assistant()
 
 
 def _fmt_ms(ms: int) -> str:

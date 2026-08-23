@@ -1,7 +1,7 @@
 # Optional SAM 2.1 Tiny runtime for the desktop tracker.
 # Not required for `python -m tests.ai.ci`.
 #
-#   pip install -r requirements-ai.txt
+#   .venv/bin/python -m pip install -r requirements-ai.txt
 #
 # Weights are downloaded on first use into ~/.cache/tracklab/models/
 # (Apache 2.0, facebook/sam2.1-hiera-tiny).

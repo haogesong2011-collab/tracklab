@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -35,6 +36,7 @@ class TrackListPanel(QWidget):
     track_requested = Signal()
     cancel_requested = Signal()
     shake_toggled = Signal(bool)
+    mode_changed = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -59,6 +61,15 @@ class TrackListPanel(QWidget):
         self._track_btn = QPushButton("自动跟踪")
         self._track_btn.setObjectName("panelButtonPrimary")
         self._track_btn.clicked.connect(self.track_requested.emit)
+        self._mode_combo = QComboBox()
+        self._mode_combo.setObjectName("trackModeCombo")
+        self._mode_combo.addItem("快速", "fast")
+        self._mode_combo.addItem("精准", "precise")
+        self._mode_combo.setCurrentIndex(0)
+        self._mode_combo.setToolTip(
+            "快速：模板匹配，接近实时，不加载 SAM。\n精准：SAM 2.1 Tiny，适合遮挡和形变。"
+        )
+        self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         self._cancel_btn = QPushButton("取消")
         self._cancel_btn.setObjectName("panelButton")
         self._cancel_btn.setEnabled(False)
@@ -88,6 +99,7 @@ class TrackListPanel(QWidget):
         run = QHBoxLayout()
         run.setSpacing(6)
         run.addWidget(self._track_btn)
+        run.addWidget(self._mode_combo)
         run.addWidget(self._cancel_btn)
 
         layout = QVBoxLayout(self)
@@ -133,8 +145,22 @@ class TrackListPanel(QWidget):
 
     def set_running(self, running: bool) -> None:
         self._track_btn.setEnabled(not running)
+        self._mode_combo.setEnabled(not running)
         self._cancel_btn.setEnabled(running)
         self._track_btn.setText("跟踪中…" if running else "自动跟踪")
+
+    def set_track_mode(self, mode: str) -> None:
+        index = 0 if mode == "fast" else 1
+        self._mode_combo.blockSignals(True)
+        self._mode_combo.setCurrentIndex(index)
+        self._mode_combo.blockSignals(False)
+
+    def set_mode_enabled(self, enabled: bool) -> None:
+        self._mode_combo.setEnabled(enabled)
+
+    def _on_mode_changed(self, _index: int) -> None:
+        data = self._mode_combo.currentData()
+        self.mode_changed.emit(str(data) if data is not None else "fast")
 
     def set_progress(self, current: int, total: int, message: str = "") -> None:
         total = max(total, 1)
@@ -142,7 +168,7 @@ class TrackListPanel(QWidget):
         if message:
             self._status.setText(message)
         else:
-            self._status.setText(f"SAM 2 跟踪 {current} / {total}")
+            self._status.setText(f"跟踪 {current} / {total}")
 
     def set_hint(self, text: str) -> None:
         self._status.setText(text)
@@ -181,8 +207,6 @@ class TrackDataPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("trackDataPanel")
         self.setMinimumHeight(140)
-        title = QLabel("数据表")
-        title.setObjectName("panelTitle")
         self._table = QTableWidget(0, 8)
         self._table.setObjectName("trackTable")
         self._position_unit = "px"
@@ -191,12 +215,17 @@ class TrackDataPanel(QWidget):
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._table.setWordWrap(False)
+        self._table.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        header = self._table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setMinimumSectionSize(40)
+        header.setStretchLastSection(False)
         self._table.cellClicked.connect(self._on_cell)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 6, 10, 8)
-        layout.setSpacing(6)
-        layout.addWidget(title)
+        layout.setContentsMargins(8, 4, 8, 8)
+        layout.setSpacing(4)
         layout.addWidget(self._table)
 
     def _header_labels(self) -> list[str]:
@@ -262,6 +291,10 @@ class TrackDataPanel(QWidget):
                     item.setForeground(warn)
                     item.setToolTip(f"低可信度：{sample.confidence:.2f}")
                 self._table.setItem(row, col, item)
+        self._table.resizeColumnsToContents()
+        for col in range(self._table.columnCount()):
+            width = self._table.columnWidth(col)
+            self._table.setColumnWidth(col, min(max(width + 8, 48), 128))
 
     def highlight_frame(self, frame: int) -> None:
         for row in range(self._table.rowCount()):

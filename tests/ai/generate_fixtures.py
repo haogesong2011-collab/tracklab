@@ -486,6 +486,143 @@ def physics_pendulum_clip() -> tuple[list[np.ndarray], ClipAnnotation]:
     return frames, ann
 
 
+def physics_freefall_clip(n: int = 20) -> tuple[list[np.ndarray], ClipAnnotation]:
+    frames: list[np.ndarray] = []
+    track: list[TrackFrameGT] = []
+    g_px = 981.0
+    ppm = 100.0
+    for i in range(n):
+        t = i / FPS
+        cx, cy = 160.0, 18.0 + 0.5 * g_px * t * t
+        img = _blank((26, 28, 32))
+        _draw_disk(img, cx, cy, 7, (90, 220, 120))
+        frames.append(img)
+        track.append(TrackFrameGT(frame=i, center=Point2D(cx, cy)))
+    ann = ClipAnnotation(
+        clip_id="physics_freefall",
+        task=TaskKind.PHYSICS,
+        scene=Scene.FREEFALL,
+        difficulty=Difficulty.NORMAL,
+        width=WIDTH,
+        height=HEIGHT,
+        fps=FPS,
+        frame_count=n,
+        track=track,
+        physics=PhysicsGT(gravity_ms2=9.81, trajectory_fit_error=0.0),
+        calibration=CalibrationGT(
+            ruler_a=Point2D(10, 160),
+            ruler_b=Point2D(10 + ppm, 160),
+            length_m=1.0,
+            origin=Point2D(160, 18),
+            axis_angle_deg=0.0,
+        ),
+        notes="synthetic free fall",
+    )
+    return frames, ann
+
+
+def physics_accel_clip(n: int = 40) -> tuple[list[np.ndarray], ClipAnnotation]:
+    frames: list[np.ndarray] = []
+    track: list[TrackFrameGT] = []
+    v0, a, ppm = 30.0, 120.0, 100.0
+    for i in range(n):
+        t = i / FPS
+        cx = 20 + v0 * t + 0.5 * a * t * t
+        cy = 90.0
+        img = _blank((32, 32, 38))
+        _draw_rect(img, 16, 98, WIDTH - 32, 8, (90, 90, 90))
+        _draw_rect(img, int(cx - 10), int(cy - 8), 20, 16, (240, 180, 60))
+        frames.append(img)
+        track.append(TrackFrameGT(frame=i, center=Point2D(cx, cy)))
+    ann = ClipAnnotation(
+        clip_id="physics_accel",
+        task=TaskKind.PHYSICS,
+        scene=Scene.ACCEL,
+        difficulty=Difficulty.NORMAL,
+        width=WIDTH,
+        height=HEIGHT,
+        fps=FPS,
+        frame_count=n,
+        track=track,
+        physics=PhysicsGT(acceleration_ms2=a / ppm, trajectory_fit_error=0.0),
+        calibration=CalibrationGT(
+            ruler_a=Point2D(10, 160),
+            ruler_b=Point2D(10 + ppm, 160),
+            length_m=1.0,
+            origin=Point2D(20, 90),
+            axis_angle_deg=0.0,
+        ),
+        notes="synthetic uniform acceleration",
+    )
+    return frames, ann
+
+
+def physics_projectile_clip(n: int = 18) -> tuple[list[np.ndarray], ClipAnnotation]:
+    frames: list[np.ndarray] = []
+    track: list[TrackFrameGT] = []
+    vx, vy, g_px, ppm = 80.0, 20.0, 981.0, 100.0
+    for i in range(n):
+        t = i / FPS
+        cx = 20 + vx * t
+        cy = 18 + vy * t + 0.5 * g_px * t * t
+        img = _blank((26, 28, 32))
+        if 0 <= cx < WIDTH and 0 <= cy < HEIGHT:
+            _draw_disk(img, cx, cy, 7, (90, 220, 120))
+            visible = True
+        else:
+            visible = False
+        frames.append(img)
+        track.append(TrackFrameGT(frame=i, center=Point2D(cx, cy), visible=visible))
+    ann = ClipAnnotation(
+        clip_id="physics_projectile",
+        task=TaskKind.PHYSICS,
+        scene=Scene.PROJECTILE,
+        difficulty=Difficulty.NORMAL,
+        width=WIDTH,
+        height=HEIGHT,
+        fps=FPS,
+        frame_count=n,
+        track=track,
+        physics=PhysicsGT(gravity_ms2=9.81, trajectory_fit_error=0.0),
+        calibration=CalibrationGT(
+            ruler_a=Point2D(10, 160),
+            ruler_b=Point2D(10 + ppm, 160),
+            length_m=1.0,
+            origin=Point2D(20, 18),
+            axis_angle_deg=0.0,
+        ),
+        notes="synthetic projectile",
+    )
+    return frames, ann
+
+
+def physics_slider_clip(n: int = 40) -> tuple[list[np.ndarray], ClipAnnotation]:
+    frames, _ann = slider_track(n)
+    ppm = 120.0
+    v_ms = 6.0 * FPS / ppm
+    ann = ClipAnnotation(
+        clip_id="physics_slider",
+        task=TaskKind.PHYSICS,
+        scene=Scene.SLIDER,
+        difficulty=Difficulty.NORMAL,
+        width=WIDTH,
+        height=HEIGHT,
+        fps=FPS,
+        frame_count=n,
+        track=_ann.track,
+        physics=PhysicsGT(velocity_ms=v_ms, acceleration_ms2=0.0, trajectory_fit_error=0.0),
+        calibration=CalibrationGT(
+            ruler_a=Point2D(20, HEIGHT - 20),
+            ruler_b=Point2D(20 + ppm, HEIGHT - 20),
+            length_m=1.0,
+            origin=Point2D(30, 106),
+            axis_angle_deg=0.0,
+        ),
+        notes="synthetic uniform slider",
+    )
+    return frames, ann
+
+
 CLIP_BUILDERS = [
     ("track_ball_normal.mp4", lambda: ball_track(hard=False)),
     ("track_ball_hard.mp4", lambda: ball_track(hard=True)),
@@ -497,6 +634,10 @@ CLIP_BUILDERS = [
     ("pose_walk_normal.mp4", lambda: pose_clip(hard=False)),
     ("pose_jump_hard.mp4", lambda: pose_clip(hard=True)),
     ("physics_pendulum.mp4", physics_pendulum_clip),
+    ("physics_freefall.mp4", physics_freefall_clip),
+    ("physics_accel.mp4", physics_accel_clip),
+    ("physics_projectile.mp4", physics_projectile_clip),
+    ("physics_slider.mp4", physics_slider_clip),
 ]
 
 # Unique extra clips for the 60-slot set. Not part of the 10-clip CI freeze.
@@ -511,7 +652,7 @@ EXTRA_BUILDERS = [
 
 
 def build_fixtures(holdout_ratio: float = 0.2) -> Manifest:
-    """Write the frozen 10-clip CI set and a 60-slot expanded manifest."""
+    """Write the CI synthetic clip set and a 60-slot expanded manifest."""
     FIXTURES.mkdir(parents=True, exist_ok=True)
     ANNOTATIONS.mkdir(parents=True, exist_ok=True)
     (ROOT / "datasets").mkdir(parents=True, exist_ok=True)

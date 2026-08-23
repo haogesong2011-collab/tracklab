@@ -17,17 +17,20 @@ from typing import Callable
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal
 
+from ai.assistant_report import render_report_markdown
 from ai.calibration import CalibrationState
 from ai.contracts import (
     TRACK_COLORS,
+    AssistantState,
     CancelToken,
     ProgressEvent,
     TrackLayer,
+    TrackMode,
     TrackPoint,
     TrackPrompt,
     TrackResult,
 )
-from ai.kinematics import series_for_result
+from ai.kinematics import DEFAULT_VELOCITY_STEP, series_for_result
 from ai.models import ColorBlobTracker, load_video
 from ai.schema import Point2D
 from ai.stabilize import ShakeCompensation, estimate_shake
@@ -65,7 +68,7 @@ class ProjectDocument:
     video_path: Path
     tracks: list[TrackLayer]
     active_track_id: str | None = None
-    schema: str = "tracklab.project.v3"
+    schema: str = "tracklab.project.v4"
     model_name: str = ""
     model_version: str = ""
     model_license: str = ""
@@ -73,6 +76,20 @@ class ProjectDocument:
     show_prompts: bool = True
     show_calibration: bool = True
     calibration: CalibrationState = field(default_factory=CalibrationState)
+    assistant: AssistantState = field(default_factory=AssistantState)
+    track_mode: TrackMode = TrackMode.FAST
+
+
+def create_tracker(mode: TrackMode | str = TrackMode.FAST):
+    """Desktop tracker factory. Fast must not import SAM / PyTorch."""
+    resolved = TrackMode(mode)
+    if resolved is TrackMode.PRECISE:
+        from ai.sam2_tracker import Sam2Tracker
+
+        return Sam2Tracker()
+    from ai.autotracker import TrackerAutoTracker
+
+    return TrackerAutoTracker()
 
 
 class TrackWorker(QObject):
@@ -112,9 +129,7 @@ class TrackWorker(QObject):
             info = load_video(self._path)
             tracker = self._tracker
             if tracker is None:
-                from ai.sam2_tracker import Sam2Tracker
-
-                tracker = Sam2Tracker()
+                tracker = create_tracker(TrackMode.FAST)
 
             def on_progress(event: ProgressEvent) -> None:
                 self.progress.emit(event)
@@ -253,9 +268,10 @@ def apply_manual_override(
     )
 
 
-PROJECT_SCHEMA = "tracklab.project.v3"
+PROJECT_SCHEMA = "tracklab.project.v4"
 LEGACY_SCHEMA = "tracklab.project.v1"
 LEGACY_V2_SCHEMA = "tracklab.project.v2"
+LEGACY_V3_SCHEMA = "tracklab.project.v3"
 
 
 def new_track_id() -> str:
@@ -292,6 +308,8 @@ def write_track_project(
     show_prompts: bool = True,
     show_calibration: bool = True,
     calibration: CalibrationState | None = None,
+    assistant: AssistantState | None = None,
+    track_mode: TrackMode | str = TrackMode.FAST,
 ) -> None:
     """Persist video path + tracks (including manual overrides) to JSON."""
     layers = list(tracks or [])
@@ -312,8 +330,10 @@ def write_track_project(
             "calibration": show_calibration,
         },
         "calibration": (calibration or CalibrationState()).to_dict(),
+        "track_mode": TrackMode(track_mode).value,
         "tracks": [layer.to_dict() for layer in layers],
         "track": None if result is None else result.to_dict(),
+        "assistant": (assistant or AssistantState()).to_dict(),
     }
     Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -332,6 +352,10 @@ def read_track_project(path: Path) -> ProjectDocument:
     active = raw.get("active_track_id")
     if active is None and tracks:
         active = tracks[0].track_id
+    try:
+        track_mode = TrackMode(str(raw.get("track_mode", TrackMode.FAST.value)))
+    except ValueError:
+        track_mode = TrackMode.FAST
     return ProjectDocument(
         video_path=video,
         tracks=tracks,
@@ -344,6 +368,27 @@ def read_track_project(path: Path) -> ProjectDocument:
         show_prompts=bool(display.get("prompts", True)),
         show_calibration=bool(display.get("calibration", True)),
         calibration=CalibrationState.from_dict(raw.get("calibration")),
+        assistant=AssistantState.from_dict(raw.get("assistant")),
+        track_mode=track_mode,
+    )
+
+
+def export_assistant_report(path: Path, markdown: str) -> None:
+    dest = Path(path)
+    if dest.suffix.lower() != ".md":
+        dest = dest.with_suffix(".md")
+    dest.write_text(markdown, encoding="utf-8")
+
+
+def build_assistant_report(assistant: AssistantState, *, stale: bool = False) -> str:
+    return render_report_markdown(
+        assistant.analysis,
+        confirmed_type=assistant.confirmed_type,
+        sections=assistant.report_sections,
+        teaching_level=assistant.teaching_level,
+        generated_at=assistant.generated_at,
+        model_id=assistant.model_id,
+        stale=stale or assistant.stale,
     )
 
 
@@ -353,8 +398,14 @@ def export_track_csv(
     info: VideoInfo,
     *,
     calibration: CalibrationState | None = None,
+    velocity_step: int | None = None,
 ) -> None:
-    samples = series_for_result(result, info, calibration=calibration)
+    samples = series_for_result(
+        result,
+        info,
+        calibration=calibration,
+        velocity_step=DEFAULT_VELOCITY_STEP if velocity_step is None else velocity_step,
+    )
     unit = samples[0].position_unit if samples else ("m" if calibration and calibration.active else "px")
     speed = samples[0].speed_unit if samples else ("m/s" if unit == "m" else "px/s")
     pos_key = "m" if unit == "m" else "px"

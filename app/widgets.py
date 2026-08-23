@@ -1078,6 +1078,7 @@ class TimelineSlider(QSlider):
     """Timeline with draggable loop-range markers above and a playhead below."""
 
     loop_range_changed = Signal(int, int)
+    loop_marker_moved = Signal(int)
 
     MARKER_GRAB_PX = 9
 
@@ -1154,9 +1155,12 @@ class TimelineSlider(QSlider):
         if self._dragging is not None:
             value = self._value_at(event.position().x())
             if self._dragging == "start":
-                self.set_loop_range(min(value, self._loop_end), self._loop_end)
+                value = min(value, self._loop_end)
+                self.set_loop_range(value, self._loop_end)
             else:
-                self.set_loop_range(self._loop_start, max(value, self._loop_start))
+                value = max(value, self._loop_start)
+                self.set_loop_range(self._loop_start, value)
+            self.loop_marker_moved.emit(value)
             return
         if self.isSliderDown():
             self.setValue(self._value_at(event.position().x()))

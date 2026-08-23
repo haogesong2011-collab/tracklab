@@ -12,7 +12,12 @@ if str(ROOT) not in sys.path:
 
 from ai.calibration import uniform_state, near_far_state, RulerSegment, RulerRole  # noqa: E402
 from ai.contracts import TrackPoint, TrackResult  # noqa: E402
-from ai.kinematics import contiguous_segments, sample_at_frame, series_for_result  # noqa: E402
+from ai.kinematics import (  # noqa: E402
+    contiguous_segments,
+    fit_quantity,
+    sample_at_frame,
+    series_for_result,
+)
 from ai.schema import Point2D  # noqa: E402
 from engine.video_index import VideoInfo  # noqa: E402
 
@@ -145,7 +150,7 @@ class KinematicsTests(unittest.TestCase):
         self.assertAlmostEqual(samples[1].x or 0.0, 1.0, places=5)
         self.assertAlmostEqual(samples[1].vx or 0.0, 10.0, places=5)
 
-    def test_falling_velocity_stays_positive(self) -> None:
+    def test_falling_velocity_is_negative_by_default(self) -> None:
         info = _info((0, 100, 200))
         result = TrackResult(
             clip_id="c",
@@ -156,21 +161,21 @@ class KinematicsTests(unittest.TestCase):
             ],
         )
         raw = series_for_result(result, info)
-        self.assertGreater(raw[1].vy or 0.0, 0.0)
+        self.assertLess(raw[1].vy or 0.0, 0.0)
 
         scaled = uniform_state(Point2D(0, 0), Point2D(100, 0), length_m=1.0)
         scaled_samples = series_for_result(result, info, calibration=scaled)
-        self.assertGreater(scaled_samples[1].vy or 0.0, 0.0)
+        self.assertLess(scaled_samples[1].vy or 0.0, 0.0)
 
         scaled.frame.origin_x = 10.0
         scaled.frame.origin_y = 0.0
         world = series_for_result(result, info, calibration=scaled)
-        self.assertFalse(scaled.frame.y_up)
-        self.assertGreater(world[1].vy or 0.0, 0.0)
+        self.assertTrue(scaled.frame.y_up)
+        self.assertLess(world[1].vy or 0.0, 0.0)
 
-        scaled.frame.y_up = True
-        flipped = series_for_result(result, info, calibration=scaled)
-        self.assertLess(flipped[1].vy or 0.0, 0.0)
+        scaled.frame.y_up = False
+        image = series_for_result(result, info, calibration=scaled)
+        self.assertGreater(image[1].vy or 0.0, 0.0)
 
     def test_occlusion_does_not_cross_segments_in_world(self) -> None:
         info = _info((0, 100, 200, 300, 400))
@@ -208,6 +213,68 @@ class KinematicsTests(unittest.TestCase):
         self.assertEqual(samples[0].position_unit, "m")
         self.assertAlmostEqual(samples[1].x or 0.0, 1.0, places=3)
         self.assertAlmostEqual(samples[1].vx or 0.0, 1.0, places=3)
+
+    def test_projectile_apex_vy_zero_and_linear(self) -> None:
+        fps = 50.0
+        n = 21
+        v0y, g, ppm = 2.0, 10.0, 100.0
+        apex = 10
+        pts = tuple(int(round(i * 1000.0 / fps)) for i in range(n))
+        info = _info(pts)
+        points = []
+        for i in range(n):
+            t = i / fps
+            # Image y grows downward; +y up display is v0y t − 0.5 g t².
+            y_img = 200.0 - (v0y * t - 0.5 * g * t * t) * ppm
+            points.append(TrackPoint(frame=i, x=float(i), y=y_img))
+        result = TrackResult(clip_id="proj", points=points)
+        cal = uniform_state(Point2D(0, 0), Point2D(ppm, 0), length_m=1.0)
+        samples = series_for_result(result, info, calibration=cal, velocity_step=3)
+        self.assertEqual(samples[apex].frame, apex)
+        self.assertIsNotNone(samples[apex].vy)
+        self.assertIsNotNone(samples[apex - 3].vy)
+        self.assertIsNotNone(samples[apex + 3].vy)
+        self.assertAlmostEqual(samples[apex].vy, 0.0, places=5)
+        self.assertGreater(samples[apex - 3].vy, 0.0)
+        self.assertLess(samples[apex + 3].vy, 0.0)
+        dt = 1.0 / fps
+        self.assertAlmostEqual(
+            samples[apex + 3].vy - samples[apex].vy,
+            -g * 3 * dt,
+            places=4,
+        )
+
+    def test_velocity_step_averages_jitter(self) -> None:
+        info = _info(tuple(range(0, 900, 100)))
+        jitter = (0, 3, -2, 4, -1, 2, -3, 1, 0)
+        points = [
+            TrackPoint(frame=i, x=float(10 * i + jitter[i]), y=0.0)
+            for i in range(9)
+        ]
+        result = TrackResult(clip_id="c", points=points)
+        noisy = series_for_result(result, info, velocity_step=1)
+        smooth = series_for_result(result, info, velocity_step=3)
+        mid = 4
+        self.assertGreater(
+            abs((noisy[mid].vx or 0.0) - 100.0),
+            abs((smooth[mid].vx or 0.0) - 100.0),
+        )
+
+    def test_quantity_linear_and_quadratic_fit(self) -> None:
+        info = _info(tuple(i * 100 for i in range(8)))
+        result = TrackResult(
+            clip_id="c",
+            points=[TrackPoint(frame=i, x=float(2 + 5 * i), y=float(i * i)) for i in range(8)],
+        )
+        samples = series_for_result(result, info, velocity_step=1)
+        line = fit_quantity(samples, "x", 1)
+        assert line is not None
+        self.assertGreater(line.r2, 0.999)
+        self.assertIn("x =", line.equation("x"))
+        quad = fit_quantity(samples, "y", 2)
+        assert quad is not None
+        self.assertGreater(quad.r2, 0.999)
+        self.assertAlmostEqual(quad.evaluate(samples[3].time_s), samples[3].y or 0.0, places=4)
 
 
 if __name__ == "__main__":
