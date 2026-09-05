@@ -48,7 +48,7 @@ def render_report_markdown(
     lines.extend(_section("二、器材与数据条件", _equipment_block(analysis, candidate, prose.get("equipment"))))
     lines.extend(_section("三、原理", _principle_block(confirmed_type, candidate, prose.get("principle"))))
     lines.extend(_section("四、公式与结果", _results_block(candidate, analysis)))
-    lines.extend(_section("五、误差与注意", prose.get("errors", "以本地拟合残差与缺失条件为准。")))
+    lines.extend(_section("五、误差与注意", _errors_block(analysis, prose.get("errors"))))
     lines.extend(_section("六、结论", prose.get("conclusion", "（未生成文字说明）")))
     lines.append("")
     lines.append("数值全部来自 TrackLab 本地拟合；模型文字只作解释，不作为原始数据。")
@@ -88,6 +88,8 @@ def _equipment_block(
         bits.append(
             f"标定：{'已启用，单位 ' + analysis.position_unit if analysis.calibration_active else '未标定，单位 px'}"
         )
+        if analysis.calibration_active:
+            bits.append("测量主链路为几何标定；AI 深度只作离面预警，不改写坐标")
         bits.append(f"轨迹覆盖率：{analysis.coverage:.3f}")
         bits.append(f"平均跟踪置信度：{analysis.mean_track_confidence:.3f}")
         if analysis.missing:
@@ -99,6 +101,20 @@ def _equipment_block(
             f"{candidate.fit.n_samples} 个样本"
         )
     local = "\n".join(f"- {item}" for item in bits) if bits else "- （无本地条件）"
+    extra = (prose or "").strip()
+    if extra:
+        return local + "\n\n" + extra
+    return local
+
+
+def _errors_block(analysis: ExperimentAnalysis | None, prose: str | None) -> str:
+    bits: list[str] = []
+    if analysis is not None:
+        for item in analysis.warnings:
+            bits.append(f"- {item}")
+        if analysis.missing:
+            bits.append("- 缺失条件：" + "、".join(analysis.missing))
+    local = "\n".join(bits) if bits else "以本地拟合残差与缺失条件为准。"
     extra = (prose or "").strip()
     if extra:
         return local + "\n\n" + extra

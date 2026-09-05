@@ -293,6 +293,21 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertEqual(set(window._view_bar._fields), {"t", "x", "y"})
         self.assertEqual(window._video_info.objectName(), "videoInfoLabel")
         self.assertEqual(window._video_info.text(), "")
+        help_menu = None
+        for action in window.menuBar().actions():
+            if action.text().replace("&", "") == "帮助":
+                help_menu = action.menu()
+                break
+        self.assertIsNotNone(help_menu)
+        help_labels = [
+            action.text().replace("&", "")
+            for action in help_menu.actions()
+            if action.text()
+        ]
+        self.assertIn("检查更新…", help_labels)
+        self.assertIn("启动时自动检查更新", help_labels)
+        self.assertIn("关于 TrackLab", help_labels)
+        self.assertTrue(window._auto_update_action.isEnabled())
         window.close()
 
     def test_view_bar_chart_and_manual_edit(self) -> None:
@@ -318,7 +333,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
             ],
         )
         window._refresh_track_ui()
-        self.assertEqual(window._data_panel._table.columnCount(), 8)
+        self.assertEqual(window._data_panel._table.columnCount(), 12)
         self.assertEqual(window._data_panel._table.rowCount(), 5)
         self.assertEqual(window._data_panel._table.item(2, 2).text(), "")
         self.assertEqual(set(window._view_bar._fields), {"t", "x", "y"})
@@ -544,7 +559,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
                 encoding="utf-8",
             )
             old = read_track_project(v2)
-        self.assertEqual(doc.schema, "tracklab.project.v4")
+        self.assertEqual(doc.schema, "tracklab.project.v5")
         self.assertFalse(doc.show_calibration)
         self.assertEqual(doc.track_mode.value, "precise")
         self.assertEqual(doc.calibration.mode, CalibrationMode.UNIFORM)
@@ -982,7 +997,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
             from ai.desktop import export_assistant_report
 
             export_assistant_report(md_path, doc.assistant.report_markdown)
-            self.assertEqual(doc.schema, "tracklab.project.v4")
+            self.assertEqual(doc.schema, "tracklab.project.v5")
             self.assertEqual(doc.assistant.confirmed_type, ExperimentType.UNIFORM_LINEAR)
             self.assertIn("1.5", doc.assistant.report_markdown)
             self.assertEqual(old.schema, "tracklab.project.v3")
@@ -1026,6 +1041,73 @@ class DesktopAcceptanceTests(unittest.TestCase):
         )
         self.assertIn("1.23456", markdown)
         self.assertIn("测速度", markdown)
+        self.assertIn("几何标定", markdown)
+
+    def test_planar_apply_undo_project_and_csv(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        from ai.calibration import CalibrationMode
+        from ai.schema import Point2D
+        from app.main_window import MainWindow
+        from tests.ai.dataset import load_manifest, resolve_video
+        from ai.models import load_video
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        _ = app
+        window = MainWindow()
+        window._cal_dialog.set_mode(CalibrationMode.PLANAR)
+        window._cal_dialog.set_plane_size(1.6, 1.2)
+        window._pending_plane = [
+            Point2D(40, 40),
+            Point2D(200, 40),
+            Point2D(200, 160),
+            Point2D(40, 160),
+        ]
+        window._apply_pending_calibration()
+        self.assertEqual(window._calibration.mode, CalibrationMode.PLANAR)
+        self.assertTrue(window._calibration.active)
+        self.assertTrue(window._calibration.rulers == [])
+        window._undo()
+        self.assertEqual(window._calibration.mode, CalibrationMode.NONE)
+        window._redo()
+        self.assertEqual(window._calibration.mode, CalibrationMode.PLANAR)
+        window._new_track()
+        layer = window._tracks[0]
+        layer.result = TrackResult(
+            clip_id="c",
+            points=[TrackPoint(frame=0, x=80, y=80), TrackPoint(frame=1, x=120, y=90)],
+        )
+        window._refresh_track_ui()
+        self.assertEqual(window._data_panel._table.horizontalHeaderItem(2).text(), "x (m)")
+        self.assertEqual(window._data_panel._table.horizontalHeaderItem(10).text(), "质量")
+        self.assertIn("几何", window._data_panel._table.item(0, 10).text())
+        manifest = load_manifest()
+        entry = next(e for e in manifest.entries if e.clip_id == "track_ball_normal")
+        info = load_video(resolve_video(entry))
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "plane.json"
+            csv_path = Path(tmp) / "plane.csv"
+            write_track_project(
+                project,
+                info.path,
+                layer.result,
+                calibration=window._calibration,
+                depth_audit=window._depth_audit,
+            )
+            export_track_csv(
+                csv_path,
+                layer.result,
+                info,
+                calibration=window._calibration,
+            )
+            doc = read_track_project(project)
+            text = csv_path.read_text(encoding="utf-8")
+        self.assertEqual(doc.schema, "tracklab.project.v5")
+        self.assertEqual(doc.calibration.mode, CalibrationMode.PLANAR)
+        self.assertEqual(len(doc.calibration.plane.corners), 4)
+        self.assertIn("sigma_x", text)
+        self.assertIn("quality", text)
+        self.assertIn("几何测量", text)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,9 @@
 # Weights are downloaded on first use into ~/.cache/tracklab/models/
 # (Apache 2.0, facebook/sam2.1-hiera-tiny).
 # Video frames are decoded with PyAV; decord is not required.
+#
+# Optional MoGe-2 ViT-S for sparse off-plane audit (not used by fast tracking):
+#   python -m pip install moge-2
 
 torch>=2.5.1
 torchvision>=0.20.1

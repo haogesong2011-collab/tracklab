@@ -10,11 +10,14 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ai.calibration import uniform_state, near_far_state, RulerSegment, RulerRole  # noqa: E402
+from ai.calibration import uniform_state, near_far_state, RulerSegment, RulerRole, planar_state  # noqa: E402
 from ai.contracts import TrackPoint, TrackResult  # noqa: E402
+from ai.depth_audit import DepthAuditState, OffPlaneReading  # noqa: E402
 from ai.kinematics import (  # noqa: E402
     contiguous_segments,
     fit_quantity,
+    is_low_confidence,
+    quality_label,
     sample_at_frame,
     series_for_result,
 )
@@ -275,6 +278,48 @@ class KinematicsTests(unittest.TestCase):
         assert quad is not None
         self.assertGreater(quad.r2, 0.999)
         self.assertAlmostEqual(quad.evaluate(samples[3].time_s), samples[3].y or 0.0, places=4)
+
+    def test_planar_sigma_and_quality_flags(self) -> None:
+        info = _info((0, 100, 200))
+        cal = planar_state(
+            [Point2D(40, 40), Point2D(200, 40), Point2D(200, 160), Point2D(40, 160)],
+            width_m=1.6,
+            height_m=1.2,
+        )
+        result = TrackResult(
+            clip_id="c",
+            points=[
+                TrackPoint(frame=0, x=80, y=80),
+                TrackPoint(frame=1, x=120, y=80),
+                TrackPoint(frame=2, x=10, y=10),
+            ],
+        )
+        audit = DepthAuditState(
+            readings={
+                1: OffPlaneReading(frame=1, residual_m=0.08, flag="off_plane"),
+            }
+        )
+        samples = series_for_result(result, info, calibration=cal, depth_audit=audit)
+        self.assertEqual(samples[0].position_unit, "m")
+        self.assertEqual(samples[0].source, "geometric")
+        self.assertGreater(samples[0].sigma_x or 0.0, 0.0)
+        self.assertEqual(quality_label(samples[0]), "几何测量")
+        self.assertIn("off_plane", samples[1].quality_flags)
+        self.assertTrue(is_low_confidence(samples[1]))
+        self.assertIn("extrapolated", samples[2].quality_flags)
+        self.assertEqual(quality_label(samples[2]), "外推")
+
+    def test_uniform_mode_has_no_sigma(self) -> None:
+        info = _info((0, 100))
+        cal = uniform_state(Point2D(0, 0), Point2D(100, 0), length_m=1.0)
+        result = TrackResult(
+            clip_id="c",
+            points=[TrackPoint(frame=0, x=0, y=0), TrackPoint(frame=1, x=50, y=0)],
+        )
+        samples = series_for_result(result, info, calibration=cal)
+        self.assertEqual(samples[0].source, "scaled")
+        self.assertIsNone(samples[0].sigma_x)
+        self.assertFalse(samples[0].quality_flags)
 
 
 if __name__ == "__main__":

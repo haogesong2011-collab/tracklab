@@ -84,6 +84,16 @@ class Point2D:
 
 
 @dataclass
+class Point3D:
+    x: float
+    y: float
+    z: float = 0.0
+
+    def as_tuple(self) -> tuple[float, float, float]:
+        return self.x, self.y, self.z
+
+
+@dataclass
 class BBox:
     x: float
     y: float

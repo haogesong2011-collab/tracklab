@@ -30,10 +30,12 @@ from ai.contracts import (
     TrackPrompt,
     TrackResult,
 )
-from ai.kinematics import DEFAULT_VELOCITY_STEP, series_for_result
+from ai.depth_audit import DepthAuditState, audit_track, try_load_moge
+from ai.kinematics import DEFAULT_VELOCITY_STEP, quality_label, series_for_result
 from ai.models import ColorBlobTracker, load_video
 from ai.schema import Point2D
 from ai.stabilize import ShakeCompensation, estimate_shake
+from engine.decoder import FrameDecoder
 from engine.video_index import VideoInfo
 
 
@@ -68,7 +70,7 @@ class ProjectDocument:
     video_path: Path
     tracks: list[TrackLayer]
     active_track_id: str | None = None
-    schema: str = "tracklab.project.v4"
+    schema: str = "tracklab.project.v5"
     model_name: str = ""
     model_version: str = ""
     model_license: str = ""
@@ -78,6 +80,7 @@ class ProjectDocument:
     calibration: CalibrationState = field(default_factory=CalibrationState)
     assistant: AssistantState = field(default_factory=AssistantState)
     track_mode: TrackMode = TrackMode.FAST
+    depth_audit: DepthAuditState = field(default_factory=DepthAuditState)
 
 
 def create_tracker(mode: TrackMode | str = TrackMode.FAST):
@@ -177,6 +180,99 @@ class ShakeWorker(QObject):
             self.failed.emit(str(exc))
 
 
+class DepthAuditWorker(QObject):
+    """Sparse MoGe off-plane audit. Dedicated thread, never FramePump."""
+
+    progress = Signal(object)
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        video_path: Path,
+        result: TrackResult,
+        calibration: CalibrationState,
+        parent=None,  # noqa: ANN001
+        *,
+        experimental_correction: bool = False,
+        estimator=None,  # noqa: ANN001
+    ) -> None:
+        super().__init__(parent)
+        self._path = Path(video_path)
+        self._result = result
+        self._calibration = calibration
+        self._experimental = experimental_correction
+        self._estimator = estimator
+        self._token = CancelToken()
+
+    def cancel(self) -> None:
+        self._token.cancel()
+
+    def run(self) -> None:
+        decoder: FrameDecoder | None = None
+        try:
+            if self._token.cancelled:
+                self.failed.emit("已取消")
+                return
+            estimator = self._estimator
+            message = ""
+            if estimator is None:
+                estimator, message = try_load_moge()
+            if estimator is None:
+                self.failed.emit(message or "离面抽检模型不可用")
+                return
+            info = load_video(self._path)
+            decoder = FrameDecoder(info)
+
+            def load_frame(index: int):
+                if self._token.cancelled:
+                    raise RuntimeError("已取消")
+                return decoder.frame(index)
+
+            state = audit_track(
+                self._result,
+                self._calibration,
+                load_frame,
+                estimator,
+            )
+            state.experimental_correction = self._experimental
+            self.finished.emit(state)
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+        finally:
+            if decoder is not None:
+                decoder.close()
+
+
+def run_audit_in_thread(
+    video_path: Path,
+    result: TrackResult,
+    calibration: CalibrationState,
+    *,
+    experimental_correction: bool = False,
+    estimator=None,  # noqa: ANN001
+    on_finished: Callable | None = None,
+    on_failed: Callable | None = None,
+) -> tuple[QThread, DepthAuditWorker]:
+    thread = QThread()
+    worker = DepthAuditWorker(
+        video_path,
+        result,
+        calibration,
+        experimental_correction=experimental_correction,
+        estimator=estimator,
+    )
+    worker.moveToThread(thread)
+    thread.started.connect(worker.run)
+    if on_finished is not None:
+        worker.finished.connect(on_finished, Qt.ConnectionType.QueuedConnection)
+    if on_failed is not None:
+        worker.failed.connect(on_failed, Qt.ConnectionType.QueuedConnection)
+    worker.finished.connect(thread.quit)
+    worker.failed.connect(thread.quit)
+    return thread, worker
+
+
 def run_track_in_thread(
     video_path: Path,
     seed: tuple[float, float],
@@ -268,7 +364,7 @@ def apply_manual_override(
     )
 
 
-PROJECT_SCHEMA = "tracklab.project.v4"
+PROJECT_SCHEMA = "tracklab.project.v5"
 LEGACY_SCHEMA = "tracklab.project.v1"
 LEGACY_V2_SCHEMA = "tracklab.project.v2"
 LEGACY_V3_SCHEMA = "tracklab.project.v3"
@@ -310,6 +406,7 @@ def write_track_project(
     calibration: CalibrationState | None = None,
     assistant: AssistantState | None = None,
     track_mode: TrackMode | str = TrackMode.FAST,
+    depth_audit: DepthAuditState | None = None,
 ) -> None:
     """Persist video path + tracks (including manual overrides) to JSON."""
     layers = list(tracks or [])
@@ -334,6 +431,7 @@ def write_track_project(
         "tracks": [layer.to_dict() for layer in layers],
         "track": None if result is None else result.to_dict(),
         "assistant": (assistant or AssistantState()).to_dict(),
+        "depth_audit": (depth_audit or DepthAuditState()).to_dict(),
     }
     Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -370,6 +468,7 @@ def read_track_project(path: Path) -> ProjectDocument:
         calibration=CalibrationState.from_dict(raw.get("calibration")),
         assistant=AssistantState.from_dict(raw.get("assistant")),
         track_mode=track_mode,
+        depth_audit=DepthAuditState.from_dict(raw.get("depth_audit")),
     )
 
 
@@ -399,12 +498,14 @@ def export_track_csv(
     *,
     calibration: CalibrationState | None = None,
     velocity_step: int | None = None,
+    depth_audit: DepthAuditState | None = None,
 ) -> None:
     samples = series_for_result(
         result,
         info,
         calibration=calibration,
         velocity_step=DEFAULT_VELOCITY_STEP if velocity_step is None else velocity_step,
+        depth_audit=depth_audit,
     )
     unit = samples[0].position_unit if samples else ("m" if calibration and calibration.active else "px")
     speed = samples[0].speed_unit if samples else ("m/s" if unit == "m" else "px/s")
@@ -423,6 +524,11 @@ def export_track_csv(
                 f"v_{spd_key}",
                 "visible",
                 "confidence",
+                "sigma_x",
+                "sigma_y",
+                "quality",
+                "off_plane_m",
+                "source",
             ]
         )
         for sample in samples:
@@ -437,6 +543,11 @@ def export_track_csv(
                     "" if sample.speed is None else f"{sample.speed:.4f}",
                     int(sample.visible),
                     f"{sample.confidence:.4f}",
+                    "" if sample.sigma_x is None else f"{sample.sigma_x:.6f}",
+                    "" if sample.sigma_y is None else f"{sample.sigma_y:.6f}",
+                    quality_label(sample),
+                    "" if sample.off_plane_m is None else f"{sample.off_plane_m:.6f}",
+                    sample.source,
                 ]
             )
 

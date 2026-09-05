@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ai.contracts import TrackLayer, TrackResult
-from ai.kinematics import is_low_confidence, series_for_result
+from ai.kinematics import is_low_confidence, quality_label, quality_tooltip, series_for_result
 from app.data_views import VX_NAME, VY_NAME
 from engine.video_index import VideoInfo
 
@@ -67,7 +67,8 @@ class TrackListPanel(QWidget):
         self._mode_combo.addItem("精准", "precise")
         self._mode_combo.setCurrentIndex(0)
         self._mode_combo.setToolTip(
-            "快速：模板匹配，接近实时，不加载 SAM。\n精准：SAM 2.1 Tiny，适合遮挡和形变。"
+            "快速：模板匹配，接近实时，标准版可用。\n"
+            "精准：SAM 2.1 Tiny，适合遮挡和形变；标准安装包未包含，需从源码安装。"
         )
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         self._cancel_btn = QPushButton("取消")
@@ -207,7 +208,7 @@ class TrackDataPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("trackDataPanel")
         self.setMinimumHeight(140)
-        self._table = QTableWidget(0, 8)
+        self._table = QTableWidget(0, 12)
         self._table.setObjectName("trackTable")
         self._position_unit = "px"
         self._speed_unit = "px/s"
@@ -240,6 +241,10 @@ class TrackDataPanel(QWidget):
             f"{VY_NAME} ({speed})",
             "可见",
             "置信度",
+            f"σx ({unit})",
+            f"σy ({unit})",
+            "质量",
+            "离面 (m)",
         ]
 
     def set_units(self, position_unit: str, speed_unit: str) -> None:
@@ -282,14 +287,21 @@ class TrackDataPanel(QWidget):
                 "" if sample.vy is None else f"{sample.vy:.2f}",
                 "是" if sample.visible else "否",
                 f"{sample.confidence:.2f}",
+                "" if sample.sigma_x is None else f"{sample.sigma_x:.4f}",
+                "" if sample.sigma_y is None else f"{sample.sigma_y:.4f}",
+                quality_label(sample),
+                "" if sample.off_plane_m is None else f"{sample.off_plane_m:.3f}",
             ]
             low = is_low_confidence(sample)
+            tip = quality_tooltip(sample)
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setData(Qt.ItemDataRole.UserRole, sample.frame)
                 if low:
                     item.setForeground(warn)
-                    item.setToolTip(f"低可信度：{sample.confidence:.2f}")
+                    item.setToolTip(f"低可信度：{sample.confidence:.2f}" + (f" · {tip}" if tip else ""))
+                elif tip:
+                    item.setToolTip(tip)
                 self._table.setItem(row, col, item)
         self._table.resizeColumnsToContents()
         for col in range(self._table.columnCount()):

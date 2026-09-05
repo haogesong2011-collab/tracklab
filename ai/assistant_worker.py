@@ -16,6 +16,7 @@ from ai.deepseek_client import (
     DeepSeekError,
     DeepSeekResponse,
 )
+from ai.depth_audit import DepthAuditState
 from ai.physics import analyze_experiment
 from engine.video_index import VideoInfo
 
@@ -32,6 +33,7 @@ class AssistantJob:
     pendulum_length_m: float | None = None
     period_hint: bool = False
     force_type: ExperimentType | None = None
+    depth_audit: DepthAuditState | None = None
     api_key: str = ""
     chat_model: str = DEFAULT_CHAT_MODEL
     report_model: str = DEFAULT_REPORT_MODEL
@@ -94,6 +96,7 @@ class AssistantWorker(QObject):
             force_type=self.job.force_type,
             shake_enabled=self.job.shake_enabled,
             shake_offsets=self.job.shake_offsets,
+            depth_audit=self.job.depth_audit,
         )
         if self._token.cancelled:
             self.cancelled.emit()

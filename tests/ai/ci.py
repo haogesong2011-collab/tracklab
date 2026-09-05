@@ -27,6 +27,7 @@ def main() -> int:
             "unittest",
             "tests.ai.integration.test_desktop_acceptance",
             "tests.ai.integration.test_deepseek_client",
+            "tests.ai.integration.test_packaged_app",
             "-v",
         ],
         [sys.executable, "-m", "tests.ai.evaluate", "--split", "ci", "--model", "oracle"],

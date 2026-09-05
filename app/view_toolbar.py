@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ai.contracts import TrackLayer
-from ai.kinematics import KinematicSample, is_low_confidence
+from ai.kinematics import KinematicSample, is_low_confidence, quality_tooltip
 from app.icons import icon_size, next_icon, prev_icon, toolbar_icon
 
 
@@ -144,13 +144,13 @@ class ViewToolbar(QWidget):
             self._fields["t"].setText(_fmt(sample.time_s, 4))
             self._fields["x"].setText(_fmt(sample.x))
             self._fields["y"].setText(_fmt(sample.y))
-            self._set_low_confidence(is_low_confidence(sample))
+            self._set_low_confidence(is_low_confidence(sample), quality_tooltip(sample))
         finally:
             for field in self._fields.values():
                 field.blockSignals(False)
             self._updating = False
 
-    def _set_low_confidence(self, enabled: bool) -> None:
+    def _set_low_confidence(self, enabled: bool, extra: str = "") -> None:
         color = "#f0c14b" if enabled else ""
         for key in ("t", "x", "y"):
             label_style = f"color: {color};" if color else ""
@@ -158,7 +158,10 @@ class ViewToolbar(QWidget):
             self._labels[key].setStyleSheet(label_style)
             self._fields[key].setStyleSheet(field_style)
             if enabled:
-                self._fields[key].setToolTip("低可信度")
+                tip = "低可信度" if not extra else f"低可信度 · {extra}"
+                self._fields[key].setToolTip(tip)
+            elif extra and key != "t":
+                self._fields[key].setToolTip(extra)
             elif key == "t":
                 self._fields[key].setToolTip("t (s)")
             else:

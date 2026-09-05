@@ -4,3 +4,8 @@ numpy>=1.26.0
 openai>=1.40.0
 keyring>=25.0.0
 certifi>=2024.0.0
+
+# Optional: ChArUco lens / plane detection. Hand four-point calibration
+# does not require OpenCV.
+#   python -m pip install opencv-contrib-python
+

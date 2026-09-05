@@ -14,7 +14,7 @@ from typing import Iterable
 
 import numpy as np
 
-from ai.calibration import CalibrationState, uniform_state
+from ai.calibration import CalibrationMode, CalibrationState, uniform_state
 from ai.contracts import (
     EXPERIMENT_LABELS,
     ExperimentAnalysis,
@@ -25,6 +25,7 @@ from ai.contracts import (
     PhysicsResult,
     TrackResult,
 )
+from ai.depth_audit import DepthAuditState
 from ai.kinematics import KinematicSample, contiguous_segments, series_for_result
 from ai.schema import Point2D
 from engine.video_index import VideoInfo
@@ -137,6 +138,7 @@ def analyze_experiment(
     force_type: ExperimentType | None = None,
     shake_enabled: bool = False,
     shake_offsets: Iterable[tuple[float, float]] | None = None,
+    depth_audit: DepthAuditState | None = None,
 ) -> ExperimentAnalysis:
     cal = calibration or CalibrationState()
     clip = clip_id or (result.clip_id if result is not None else "")
@@ -152,6 +154,16 @@ def analyze_experiment(
     warnings: list[str] = []
     if not cal.active:
         missing.append("calibration")
+    if cal.camera_moved:
+        warnings.append("检测到机位移动，平面标定可能失效")
+    if cal.mode is CalibrationMode.PLANAR and cal.warning:
+        warnings.append(cal.warning)
+    if depth_audit is not None:
+        off = depth_audit.off_plane_frames()
+        if off:
+            warnings.append(f"{len(off)} 帧可能离开运动平面")
+        elif depth_audit.message:
+            warnings.append(depth_audit.message)
     if result is None or info is None:
         warnings.append("缺少轨迹或视频索引，无法分析")
         return ExperimentAnalysis(
@@ -164,7 +176,7 @@ def analyze_experiment(
             missing=missing,
         )
 
-    samples = series_for_result(result, info, calibration=cal)
+    samples = series_for_result(result, info, calibration=cal, depth_audit=depth_audit)
     visible = [item for item in samples if item.visible and item.x is not None and item.y is not None]
     coverage = (len(visible) / max(len(samples), 1)) if samples else 0.0
     mean_conf = float(np.mean([item.confidence for item in visible])) if visible else 0.0
@@ -311,6 +323,8 @@ def _si_value(
 def _calibration_quality(cal: CalibrationState) -> float:
     if not cal.active:
         return 0.4
+    if cal.camera_moved:
+        return 0.45
     if cal.warning:
         return 0.7
     return 1.0

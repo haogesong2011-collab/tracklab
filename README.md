@@ -30,6 +30,21 @@ python -m app
 - 底栏最右的循环按钮：在这个区间内反复播放
 - 文件 → 关闭视频：关掉解码器并释放缓存
 
+## macOS 安装包
+
+不需要安装 Python。从 [GitHub Releases](https://github.com/haogesong2011-collab/tracklab/releases/latest) 下载对应芯片的 DMG：
+
+- Apple 芯片（M 系列）：`TrackLab-arm64.dmg`
+- Intel 芯片：`TrackLab-x86_64.dmg`
+
+打开 DMG，把 `TrackLab` 拖到“应用程序”。当前版本未经 Apple 公证：请在 Finder 中 **右键 TrackLab → 打开**，并在提示中确认打开。之后可以像普通应用一样双击启动。
+
+标准安装包包含快速跟踪和手工平面测量。精准模式（SAM 2）与 AI 离面抽检未打包；需要这些能力时请按上面的源码方式安装 `requirements-ai.txt`。
+
+### 更新
+
+应用启动后会异步检查 GitHub Releases（默认最多每 24 小时一次）。发现新版本时会显示版本号和说明，并提供“前往下载”。更新不会在运行中替换 `.app`。也可在“帮助 → 检查更新…”里手动检查，或关闭“启动时自动检查更新”。
+
 ## 取帧方式
 
 不做导入期转码。打开文件时只 demux 一遍包头建立帧索引（60 秒 1080p 约 10 ms），播放和跳帧都靠 `engine/decoder.py` 现解：
@@ -76,3 +91,23 @@ python -m tests.ai.ci
 ```
 
 数据约定见 [datasets/README.md](datasets/README.md)。Holdout 槽位（约 20%）选型期间禁止调参。
+
+## 发布 macOS 安装包
+
+版本号只写在 [`app/__init__.py`](app/__init__.py)，关于对话框和更新检查共用该值。发布步骤：
+
+1. 把 `__version__` 改成新的 `主版本.次版本.修订号`，并在 [`CHANGELOG.md`](CHANGELOG.md) 增加对应章节。
+2. 合并到默认分支后，打并推送同版本 tag，例如 `git tag v0.1.0 && git push origin v0.1.0`。
+3. GitHub Actions 会先跑测试，再分别在 Apple 芯片与 Intel runner 上构建 `TrackLab-arm64.dmg` 与 `TrackLab-x86_64.dmg`，最后创建 GitHub Release 并上传两个 DMG 和 `SHA256SUMS.txt`。
+4. 客户端随后即可通过 `releases/latest` 检测到新版本。
+
+手动运行 **Release macOS** workflow 只上传 Actions artifact，不会创建正式 Release，避免把试构建当成最新版。
+
+本地打包（当前机器架构）：
+
+```bash
+python -m pip install -r requirements.txt -r macos-packaging/requirements-build.txt
+bash macos-packaging/build_macos.sh
+QT_QPA_PLATFORM=offscreen dist/TrackLab.app/Contents/MacOS/TrackLab --smoke
+```
+

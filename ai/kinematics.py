@@ -20,8 +20,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ai.calibration import CalibrationState
+from ai.calibration import CalibrationMode, CalibrationState
 from ai.contracts import LOW_CONFIDENCE, TrackPoint, TrackResult
+from ai.depth_audit import DepthAuditState
 from engine.video_index import VideoInfo
 
 DEFAULT_VELOCITY_STEP = 3
@@ -42,6 +43,11 @@ class KinematicSample:
     manual: bool
     position_unit: str = "px"
     speed_unit: str = "px/s"
+    sigma_x: float | None = None
+    sigma_y: float | None = None
+    quality_flags: tuple[str, ...] = ()
+    off_plane_m: float | None = None
+    source: str = "pixel"
 
     @property
     def x_px(self) -> float | None:
@@ -104,7 +110,37 @@ class QuantityFit:
 
 
 def is_low_confidence(sample: KinematicSample) -> bool:
-    return sample.visible and sample.confidence < LOW_CONFIDENCE
+    if sample.visible and sample.confidence < LOW_CONFIDENCE:
+        return True
+    return any(flag in sample.quality_flags for flag in ("extrapolated", "off_plane", "ai_estimate"))
+
+
+def quality_label(sample: KinematicSample) -> str:
+    flags = sample.quality_flags
+    if "ai_estimate" in flags:
+        return "AI估计"
+    if "off_plane" in flags:
+        return "疑似离面"
+    if "extrapolated" in flags:
+        return "外推"
+    if sample.source == "geometric":
+        return "几何测量"
+    if sample.source == "scaled":
+        return "比例尺"
+    return "像素"
+
+
+def quality_tooltip(sample: KinematicSample) -> str:
+    bits = [quality_label(sample)]
+    if sample.source and sample.source not in {"pixel", "scaled", "geometric"}:
+        bits.append(sample.source)
+    if sample.sigma_x is not None and sample.sigma_y is not None and sample.position_unit == "m":
+        bits.append(f"σx={sample.sigma_x:.4f} m  σy={sample.sigma_y:.4f} m")
+    if sample.off_plane_m is not None:
+        bits.append(f"离面残差 {sample.off_plane_m:.3f} m")
+    if sample.visible and sample.confidence < LOW_CONFIDENCE:
+        bits.append(f"跟踪置信度 {sample.confidence:.2f}")
+    return " · ".join(bits)
 
 
 def time_s_for_frame(info: VideoInfo | None, frame: int) -> float:
@@ -120,6 +156,7 @@ def series_for_result(
     *,
     calibration: CalibrationState | None = None,
     velocity_step: int = DEFAULT_VELOCITY_STEP,
+    depth_audit: DepthAuditState | None = None,
 ) -> list[KinematicSample]:
     if result is None:
         return []
@@ -141,6 +178,24 @@ def series_for_result(
             vx, vy = _velocity_at(i, points, display, bounds[i], info, step)
             if vx is not None and vy is not None:
                 speed = (vx * vx + vy * vy) ** 0.5
+        flags: list[str] = []
+        source = "pixel"
+        sigma_x = sigma_y = off_m = None
+        if point.visible:
+            source = cal.measurement_source(point.x, point.y)
+            if cal.active and cal.mode is CalibrationMode.PLANAR:
+                sx, sy = cal.position_sigma(point.x, point.y)
+                sigma_x, sigma_y = sx, sy
+            if cal.is_extrapolated(point.x, point.y):
+                flags.append("extrapolated")
+            if depth_audit is not None:
+                reading = depth_audit.readings.get(point.frame)
+                if reading is not None:
+                    off_m = reading.residual_m
+                    if reading.flag == "off_plane":
+                        flags.append("off_plane")
+                        if depth_audit.experimental_correction:
+                            flags.append("ai_estimate")
         samples.append(
             KinematicSample(
                 frame=point.frame,
@@ -155,6 +210,11 @@ def series_for_result(
                 manual=point.manual,
                 position_unit=position_unit,
                 speed_unit=speed_unit,
+                sigma_x=sigma_x,
+                sigma_y=sigma_y,
+                quality_flags=tuple(flags),
+                off_plane_m=off_m,
+                source=source,
             )
         )
     return samples

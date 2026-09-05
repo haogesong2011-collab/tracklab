@@ -147,3 +147,22 @@ class AssistantContextTests(unittest.TestCase):
         context = build_teaching_context(_analysis(), confirmed_type=None)
         self.assertFalse(context["confirmed"])
         self.assertIsNone(context["confirmed_type"])
+
+    def test_measurement_block_has_no_paths(self) -> None:
+        context = build_teaching_context(
+            _analysis(),
+            confirmed_type=ExperimentType.UNIFORM_LINEAR,
+            calibration_mode="planar",
+            reprojection_rms_px=0.4,
+            off_plane_frames=2,
+            camera_moved=True,
+            quality_label="运动平面",
+        )
+        assert_private_context(context)
+        self.assertEqual(context["measurement"]["mode"], "planar")
+        self.assertEqual(context["measurement"]["off_plane_frames"], 2)
+        self.assertTrue(context["measurement"]["camera_moved"])
+
+
+if __name__ == "__main__":
+    unittest.main()
