@@ -902,11 +902,27 @@ class VideoView(QWidget):
     def _map_video(self, dest: QRectF, sx: float, sy: float, x: float, y: float) -> QPointF:
         return QPointF(dest.x() + x * sx, dest.y() + y * sy)
 
+    @staticmethod
+    def _draw_halo_text(
+        painter: QPainter,
+        pos: QPointF,
+        text: str,
+        color: QColor,
+        halo: QColor | None = None,
+    ) -> None:
+        outline = halo or QColor(0, 0, 0, 210)
+        for dx, dy in ((-1, -1), (-1, 1), (1, -1), (1, 1), (-1, 0), (1, 0), (0, -1), (0, 1)):
+            painter.setPen(outline)
+            painter.drawText(pos + QPointF(dx, dy), text)
+        painter.setPen(color)
+        painter.drawText(pos, text)
+
     def _paint_calibration(
         self, painter: QPainter, dest: QRectF, sx: float, sy: float
     ) -> None:
         font = QFont(painter.font())
-        font.setPixelSize(11)
+        font.setPixelSize(13)
+        font.setBold(True)
         painter.setFont(font)
         accent = QColor("#80cbc4")
         for x0, y0, x1, y1, label, role in self._rulers:
@@ -919,8 +935,7 @@ class VideoView(QWidget):
             painter.drawEllipse(QRectF(p1.x() - 3.5, p1.y() - 3.5, 7, 7))
             mid = QPointF((p0.x() + p1.x()) / 2, (p0.y() + p1.y()) / 2 - 8)
             text = label if not role else f"{role} {label}"
-            painter.setPen(QColor("#d8fff8"))
-            painter.drawText(mid, text)
+            self._draw_halo_text(painter, mid, text, QColor("#ffffff"))
         if self._axis_overlay is not None:
             ox, oy, xx, xy, yx, yy, xlabel, ylabel = self._axis_overlay
             origin = self._map_video(dest, sx, sy, ox, oy)

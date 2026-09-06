@@ -26,3 +26,11 @@ def app_dir() -> Path:
 
 def style_path() -> Path:
     return app_dir() / "style.qss"
+
+
+def bundled_model_dir() -> Path | None:
+    """Frozen app directory for shipped SAM weights, if present."""
+    if not is_frozen():
+        return None
+    path = resource_root() / "models"
+    return path if path.is_dir() else None

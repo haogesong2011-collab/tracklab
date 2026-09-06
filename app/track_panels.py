@@ -67,8 +67,7 @@ class TrackListPanel(QWidget):
         self._mode_combo.addItem("精准", "precise")
         self._mode_combo.setCurrentIndex(0)
         self._mode_combo.setToolTip(
-            "快速：模板匹配，接近实时，标准版可用。\n"
-            "精准：SAM 2.1 Tiny，适合遮挡和形变；标准安装包未包含，需从源码安装。"
+            "快速：模板匹配，接近实时。\n精准：SAM 2.1 Tiny，适合遮挡和形变。"
         )
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         self._cancel_btn = QPushButton("取消")

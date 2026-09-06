@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for the standard macOS TrackLab.app (no PyTorch/SAM/MoGe)."""
+"""PyInstaller spec for the macOS TrackLab.app (fast + precise SAM 2)."""
 
 from __future__ import annotations
 
@@ -11,16 +11,13 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 ROOT = Path(SPECPATH).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+from ai.model_manager import DEFAULT_SPEC, checkpoint_path  # noqa: E402
 from app import BUNDLE_IDENTIFIER, __version__  # noqa: E402
 
 ICON = ROOT / "macos-packaging" / "TrackLab.icns"
 
-# Keep this list in source so tests can assert the standard bundle stays lean.
+# MoGe / OpenCV stay out of the installer. Torch + SAM 2 are required.
 EXCLUDES = [
-    "torch",
-    "torchvision",
-    "torchaudio",
-    "sam2",
     "moge",
     "cv2",
     "tkinter",
@@ -32,6 +29,7 @@ EXCLUDES = [
     "pandas",
     "PIL",
     "openai",
+    "torchaudio",
     "PySide6.QtWebEngine",
     "PySide6.QtWebEngineCore",
     "PySide6.QtWebEngineWidgets",
@@ -92,8 +90,6 @@ DROP_HINTS = (
     "QtWebChannel",
     "QtWebSockets",
     "QtSvg",
-    "QtPdf",
-    "libtorch",
 )
 
 datas = [(str(ROOT / "app" / "style.qss"), "app")]
@@ -112,6 +108,12 @@ hiddenimports = [
     "keyring.backends.macOS",
     "keyring.backends.fail",
     "keyring.backends.null",
+    "torch",
+    "torchvision",
+    "sam2",
+    "hydra",
+    "omegaconf",
+    "iopath",
     "app.paths",
     "app.update_checker",
     "app.update_dialog",
@@ -128,11 +130,34 @@ def _keep(item) -> bool:  # noqa: ANN001
     return not any(hint in str(name) for hint in DROP_HINTS)
 
 
-for pkg in ("PySide6", "av", "numpy", "certifi", "keyring"):
+for pkg in (
+    "PySide6",
+    "av",
+    "numpy",
+    "certifi",
+    "keyring",
+    "torch",
+    "torchvision",
+    "sam2",
+    "hydra",
+    "omegaconf",
+    "iopath",
+):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
     datas += [entry for entry in pkg_datas if _keep(entry)]
     binaries += [entry for entry in pkg_binaries if _keep(entry)]
     hiddenimports += [entry for entry in pkg_hidden if _keep(entry)]
+
+ckpt = checkpoint_path(DEFAULT_SPEC)
+if not ckpt.is_file():
+    ckpt = Path.home() / ".cache" / "tracklab" / "models" / DEFAULT_SPEC.filename
+if ckpt.is_file():
+    datas.append((str(ckpt), "models"))
+else:
+    raise SystemExit(
+        f"missing SAM 2 checkpoint {ckpt}; run the app once or "
+        "python -c \"from ai.model_manager import ensure_checkpoint; ensure_checkpoint(download=True)\""
+    )
 
 icon = str(ICON) if ICON.is_file() else None
 

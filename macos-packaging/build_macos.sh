@@ -23,6 +23,12 @@ APP="$ROOT/dist/TrackLab.app"
 DMG="$ROOT/dist/TrackLab-${ARCH}.dmg"
 
 "$PYTHON" macos-packaging/make_icon.py
+"$PYTHON" - <<'PY'
+from ai.model_manager import DEFAULT_SPEC, ensure_checkpoint
+
+ensure_checkpoint(DEFAULT_SPEC, download=True)
+print("sam checkpoint ready")
+PY
 "$PYTHON" -m PyInstaller \
   --noconfirm \
   --clean \
@@ -40,18 +46,27 @@ from pathlib import Path
 import sys
 
 root = Path(sys.argv[1])
+names = {path.name.lower() for path in root.rglob("*") if path.is_dir() or path.is_file()}
+if not any(name == "torch" or name.startswith("libtorch") for name in names):
+    print("precise bundle missing torch")
+    sys.exit(1)
+if "sam2" not in names and not any("sam2" in name for name in names):
+    print("precise bundle missing sam2")
+    sys.exit(1)
+ckpt = list(root.rglob("sam2.1_hiera_tiny.pt"))
+if not ckpt:
+    print("precise bundle missing SAM checkpoint")
+    sys.exit(1)
 leaks = []
 for path in root.rglob("*"):
     name = path.name.lower()
     rel = str(path.relative_to(root))
-    if name in {"torch", "torchvision", "torchaudio", "sam2", "moge", "cv2"} and path.is_dir():
-        leaks.append(rel)
-    if "libtorch" in name:
+    if name in {"moge", "cv2"} and path.is_dir():
         leaks.append(rel)
 if leaks:
-    print("standard bundle leaked heavy optional deps:", *leaks, sep="\n  ")
+    print("bundle leaked optional deps:", *leaks, sep="\n  ")
     sys.exit(1)
-print("bundle leak check ok")
+print("bundle precise-mode check ok")
 PY
 
 codesign --force --deep --sign - --timestamp=none "$APP"

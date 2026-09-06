@@ -25,6 +25,14 @@ def _smoke_check(window) -> int:  # noqa: ANN001
         print(f"SMOKE FAIL: missing stylesheet {style_path()}", file=sys.stderr)
         return 1
     create_tracker(TrackMode.FAST)
+    try:
+        import sam2  # noqa: F401
+        import torch  # noqa: F401
+    except ImportError:
+        if is_frozen():
+            print("SMOKE FAIL: precise-mode runtime missing from bundle", file=sys.stderr)
+            return 1
+        print("SMOKE WARN: torch/sam2 not installed in this environment", flush=True)
     state = planar_state(
         [Point2D(0, 0), Point2D(400, 0), Point2D(400, 300), Point2D(0, 300)],
         width_m=1.0,

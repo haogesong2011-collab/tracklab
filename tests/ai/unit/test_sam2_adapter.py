@@ -226,14 +226,27 @@ class FakeSam2TrackerTests(unittest.TestCase):
         self.assertTrue(urls[0].startswith("https://dl.fbaipublicfiles.com/"))
         self.assertTrue(any("huggingface.co/facebook/sam2.1-hiera-tiny" in u for u in urls))
 
-    def test_sha256_helper(self) -> None:
+    def test_bundled_checkpoint_used_when_frozen(self) -> None:
+        import os
+        from unittest import mock
+
+        from ai import model_manager as mm
+
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "blob.bin"
-            path.write_bytes(b"abc")
-            self.assertEqual(
-                sha256_file(path),
-                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-            )
+            models = Path(tmp) / "models"
+            models.mkdir()
+            ckpt = models / DEFAULT_SPEC.filename
+            ckpt.write_bytes(b"x")
+            with mock.patch.object(mm.sys, "frozen", True, create=True), mock.patch.object(
+                mm.sys, "_MEIPASS", tmp, create=True
+            ):
+                found = mm.bundled_checkpoint(DEFAULT_SPEC)
+                self.assertEqual(found, ckpt)
+                os.environ["TRACKLAB_MODEL_DIR"] = str(Path(tmp) / "unused")
+                try:
+                    self.assertEqual(mm.checkpoint_path(DEFAULT_SPEC), ckpt)
+                finally:
+                    os.environ.pop("TRACKLAB_MODEL_DIR", None)
 
 
 if __name__ == "__main__":

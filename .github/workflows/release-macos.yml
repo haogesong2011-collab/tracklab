@@ -37,7 +37,7 @@ jobs:
     name: Build ${{ matrix.arch }}
     needs: test
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -68,7 +68,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r macos-packaging/requirements-build.txt
+          python -m pip install -r requirements.txt -r requirements-ai.txt -r macos-packaging/requirements-build.txt
       - name: Build app and DMG
         run: bash macos-packaging/build_macos.sh
       - name: Smoke-test frozen app

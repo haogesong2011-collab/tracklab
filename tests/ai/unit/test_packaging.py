@@ -37,10 +37,16 @@ class PackagingMetadataTests(unittest.TestCase):
         self.assertTrue(path.is_file(), path)
         self.assertIn("QMainWindow", path.read_text(encoding="utf-8"))
 
-    def test_spec_excludes_heavy_optional_deps(self) -> None:
+    def test_spec_includes_precise_runtime(self) -> None:
         spec = (ROOT / "macos-packaging" / "TrackLab.spec").read_text(encoding="utf-8")
-        for name in ("torch", "torchvision", "sam2", "moge", "cv2"):
-            self.assertIn(f'"{name}"', spec)
+        excludes = spec.split("EXCLUDES = [", 1)[1].split("]", 1)[0]
+        self.assertNotIn('"torch"', excludes)
+        self.assertNotIn('"sam2"', excludes)
+        self.assertIn('"moge"', excludes)
+        self.assertIn('"cv2"', excludes)
+        self.assertIn('"torch"', spec)
+        self.assertIn('"sam2"', spec)
+        self.assertIn('"models"', spec)
         self.assertIn("style.qss", spec)
         self.assertIn("BUNDLE_IDENTIFIER", spec)
 

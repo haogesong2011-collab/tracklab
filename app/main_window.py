@@ -768,8 +768,8 @@ class MainWindow(QMainWindow):
             "2. 新建轨迹，框选或点击目标，按 T 开始快速跟踪。\n"
             "3. 用坐标系菜单设置标定尺或运动平面。\n"
             "4. 在数据表和分图中查看结果，需要时导出 CSV / JSON。\n\n"
-            "标准安装包包含快速跟踪与手工平面测量。\n"
-            "精准模式（SAM 2）和 AI 离面抽检需从源码安装完整依赖。",
+            "标准安装包包含快速跟踪、精准跟踪（SAM 2）与手工平面测量。\n"
+            "AI 离面抽检需从源码安装完整依赖。",
         )
 
     def _show_shortcuts(self) -> None:
@@ -788,8 +788,8 @@ class MainWindow(QMainWindow):
             self,
             "关于 TrackLab",
             f"TrackLab {__version__}\n\n"
-            "物理视频分析工具。标准版包含快速跟踪与平面测量；\n"
-            "精准模式与 AI 离面抽检为可选能力。\n\n"
+            "物理视频分析工具。本安装包包含快速跟踪、精准跟踪（SAM 2）与平面测量。\n"
+            "AI 离面抽检仍为可选能力。\n\n"
             f"项目主页：https://github.com/{GITHUB_REPO}",
         )
 
@@ -1496,25 +1496,19 @@ class MainWindow(QMainWindow):
 
     def _ensure_sam_runtime(self) -> bool:
         """Prompt once for Apache-2.0 weights. Never silently fall back to color blobs."""
-        if is_frozen():
-            QMessageBox.warning(
-                self,
-                "标准版未包含精准模式",
-                "当前安装包是标准版，包含快速跟踪与平面测量。\n"
-                "精准模式（SAM 2）未打包。如需该能力，请从源码安装完整依赖：\n"
-                "python -m pip install -r requirements-ai.txt",
-            )
-            return False
         try:
             import sam2  # noqa: F401
             import torch  # noqa: F401
         except ImportError:
+            extra = (
+                "当前安装包未包含精准模式运行时。"
+                if is_frozen()
+                else "请在项目目录执行：\n.venv/bin/python -m pip install -r requirements-ai.txt"
+            )
             QMessageBox.warning(
                 self,
                 "未安装 SAM 2",
-                "精准模式需要 PyTorch 与 SAM 2。\n"
-                "请在项目目录执行：\n"
-                ".venv/bin/python -m pip install -r requirements-ai.txt",
+                "精准模式需要 PyTorch 与 SAM 2。\n" + extra,
             )
             return False
         from ai.model_manager import ModelNotAvailable, checkpoint_path, ensure_checkpoint

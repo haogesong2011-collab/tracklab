@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -37,7 +38,14 @@ class CalibrationDialog(QWidget):
         self.setObjectName("calibrationDialog")
         self.setWindowTitle("标定")
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedWidth(300)
+        palette = self.palette()
+        light = QColor("#f5f5f5")
+        palette.setColor(QPalette.ColorRole.WindowText, light)
+        palette.setColor(QPalette.ColorRole.Text, light)
+        palette.setColor(QPalette.ColorRole.ButtonText, light)
+        self.setPalette(palette)
 
         self._uniform = QRadioButton("单尺（全图同一比例）")
         self._near_far = QRadioButton("双尺（近/远插值）")
