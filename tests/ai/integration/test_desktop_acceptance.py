@@ -628,7 +628,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
                 encoding="utf-8",
             )
             old = read_track_project(v2)
-        self.assertEqual(doc.schema, "tracklab.project.v4")
+        self.assertEqual(doc.schema, "tracklab.project.v5")
         self.assertFalse(doc.show_calibration)
         self.assertEqual(doc.calibration.mode, CalibrationMode.UNIFORM)
         self.assertAlmostEqual(doc.calibration.frame.origin_x or 0.0, 5.0)
@@ -1101,7 +1101,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
             from ai.desktop import export_assistant_report
 
             export_assistant_report(md_path, doc.assistant.report_markdown)
-            self.assertEqual(doc.schema, "tracklab.project.v4")
+            self.assertEqual(doc.schema, "tracklab.project.v5")
             self.assertEqual(doc.assistant.confirmed_type, ExperimentType.UNIFORM_LINEAR)
             self.assertIn("1.5", doc.assistant.report_markdown)
             self.assertEqual(old.schema, "tracklab.project.v3")

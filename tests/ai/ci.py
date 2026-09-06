@@ -27,6 +27,7 @@ def main() -> int:
             "unittest",
             "tests.ai.integration.test_desktop_acceptance",
             "tests.ai.integration.test_deepseek_client",
+            "tests.ai.integration.test_packaged_app",
             "-v",
         ],
         [sys.executable, "-m", "tests.ai.evaluate", "--split", "ci", "--model", "oracle"],
@@ -36,6 +37,7 @@ def main() -> int:
         cmds.insert(0, [sys.executable, "-m", "tests.ai.generate_fixtures"])
     env = os.environ.copy()
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    env.setdefault("TRACKLAB_SKIP_UPDATE_CHECK", "1")
     for cmd in cmds:
         print("+", " ".join(cmd), flush=True)
         completed = subprocess.run(cmd, cwd=ROOT, env=env)

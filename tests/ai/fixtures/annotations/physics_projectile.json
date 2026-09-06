@@ -1,0 +1,219 @@
+{
+  "clip_id": "physics_projectile",
+  "schema_version": "1.0.0",
+  "task": "physics",
+  "scene": "projectile",
+  "difficulty": "normal",
+  "width": 320,
+  "height": 180,
+  "fps": 30.0,
+  "frame_count": 18,
+  "track": [
+    {
+      "frame": 0,
+      "center": {
+        "x": 20.0,
+        "y": 18.0
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 1,
+      "center": {
+        "x": 22.666666666666668,
+        "y": 19.21166666666667
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 2,
+      "center": {
+        "x": 25.333333333333332,
+        "y": 21.513333333333332
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 3,
+      "center": {
+        "x": 28.0,
+        "y": 24.905
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 4,
+      "center": {
+        "x": 30.666666666666664,
+        "y": 29.38666666666667
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 5,
+      "center": {
+        "x": 33.33333333333333,
+        "y": 34.95833333333333
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 6,
+      "center": {
+        "x": 36.0,
+        "y": 41.620000000000005
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 7,
+      "center": {
+        "x": 38.66666666666667,
+        "y": 49.37166666666667
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 8,
+      "center": {
+        "x": 41.33333333333333,
+        "y": 58.21333333333334
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 9,
+      "center": {
+        "x": 44.0,
+        "y": 68.14500000000001
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 10,
+      "center": {
+        "x": 46.666666666666664,
+        "y": 79.16666666666666
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 11,
+      "center": {
+        "x": 49.33333333333333,
+        "y": 91.27833333333332
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 12,
+      "center": {
+        "x": 52.0,
+        "y": 104.48000000000002
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 13,
+      "center": {
+        "x": 54.66666666666667,
+        "y": 118.77166666666668
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 14,
+      "center": {
+        "x": 57.333333333333336,
+        "y": 134.15333333333334
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 15,
+      "center": {
+        "x": 60.0,
+        "y": 150.625
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 16,
+      "center": {
+        "x": 62.666666666666664,
+        "y": 168.18666666666667
+      },
+      "visible": true,
+      "bbox": null,
+      "occluded": false
+    },
+    {
+      "frame": 17,
+      "center": {
+        "x": 65.33333333333333,
+        "y": 186.83833333333334
+      },
+      "visible": false,
+      "bbox": null,
+      "occluded": false
+    }
+  ],
+  "pose": [],
+  "calibration": {
+    "ruler_a": {
+      "x": 10,
+      "y": 160
+    },
+    "ruler_b": {
+      "x": 110.0,
+      "y": 160
+    },
+    "length_m": 1.0,
+    "origin": {
+      "x": 20,
+      "y": 18
+    },
+    "axis_angle_deg": 0.0,
+    "has_reliable_ruler": true
+  },
+  "physics": {
+    "period_s": null,
+    "gravity_ms2": 9.81,
+    "velocity_ms": null,
+    "acceleration_ms2": null,
+    "trajectory_fit_error": 0.0
+  },
+  "notes": "synthetic projectile"
+}

@@ -7,6 +7,7 @@ import os
 import shutil
 import ssl
 import subprocess
+import sys
 import time
 import urllib.request
 from collections.abc import Callable
@@ -173,7 +174,29 @@ def cache_dir() -> Path:
     return Path.home() / ".cache" / "tracklab" / "models"
 
 
+def bundled_checkpoint(spec: ModelSpec = DEFAULT_SPEC) -> Path | None:
+    """Weights shipped inside a frozen .app, if PyInstaller collected them."""
+    try:
+        from app.paths import bundled_model_dir
+    except Exception:
+        bundled_model_dir = None  # type: ignore[assignment]
+    if bundled_model_dir is not None:
+        directory = bundled_model_dir()
+        if directory is not None:
+            path = directory / spec.filename
+            if path.is_file():
+                return path
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not (getattr(sys, "frozen", False) and meipass):
+        return None
+    path = Path(meipass) / "models" / spec.filename
+    return path if path.is_file() else None
+
+
 def checkpoint_path(spec: ModelSpec = DEFAULT_SPEC) -> Path:
+    bundled = bundled_checkpoint(spec)
+    if bundled is not None:
+        return bundled
     return cache_dir() / spec.filename
 
 

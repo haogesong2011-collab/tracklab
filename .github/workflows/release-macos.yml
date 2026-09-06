@@ -1,0 +1,138 @@
+name: Release macOS
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Run CI tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+          TRACKLAB_SKIP_UPDATE_CHECK: "1"
+        run: python -m tests.ai.ci
+
+  build:
+    name: Build ${{ matrix.arch }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          # Last GitHub-hosted Intel image; scheduled to retire August 2027.
+          - os: macos-15-intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify architecture
+        run: |
+          python - <<'PY'
+          import os
+          import platform
+          expected = os.environ["EXPECTED_ARCH"]
+          actual = platform.machine()
+          print(f"python={actual} expected={expected}")
+          if actual != expected:
+              raise SystemExit(f"architecture mismatch: {actual} != {expected}")
+          PY
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-ai.txt -r macos-packaging/requirements-build.txt
+      - name: Build app and DMG
+        run: bash macos-packaging/build_macos.sh
+      - name: Smoke-test frozen app
+        env:
+          QT_QPA_PLATFORM: offscreen
+          TRACKLAB_SKIP_UPDATE_CHECK: "1"
+          TRACKLAB_APP: ${{ github.workspace }}/dist/TrackLab.app
+          TRACKLAB_SMOKE_VIDEO: ${{ github.workspace }}/tests/ai/fixtures/physics_projectile.mp4
+        run: |
+          APP="$PWD/dist/TrackLab.app/Contents/MacOS/TrackLab"
+          "$APP" --version
+          "$APP" --smoke
+          python -m unittest tests.ai.integration.test_packaged_app -v
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrackLab-${{ matrix.arch }}
+          path: dist/TrackLab-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches app version
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          text = Path("app/__init__.py").read_text(encoding="utf-8")
+          match = re.search(r'__version__\s*=\s*"([^"]+)"', text)
+          if not match:
+              raise SystemExit("missing __version__")
+          version = match.group(1)
+          tag = os.environ["GITHUB_REF_NAME"]
+          if tag != f"v{version}":
+              raise SystemExit(f"tag {tag} does not match app version {version}")
+          print(f"tag {tag} matches {version}")
+          PY
+      - name: Download DMGs
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-upload
+          merge-multiple: true
+      - name: Checksums and notes
+        run: |
+          ls -la dist-upload
+          test -f dist-upload/TrackLab-arm64.dmg
+          test -f dist-upload/TrackLab-x86_64.dmg
+          (cd dist-upload && sha256sum TrackLab-arm64.dmg TrackLab-x86_64.dmg > SHA256SUMS.txt)
+          python macos-packaging/release_notes.py "${GITHUB_REF_NAME}" > dist-upload/NOTES.md
+          cat dist-upload/SHA256SUMS.txt
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "TrackLab ${GITHUB_REF_NAME}" \
+            --notes-file dist-upload/NOTES.md \
+            dist-upload/TrackLab-arm64.dmg \
+            dist-upload/TrackLab-x86_64.dmg \
+            dist-upload/SHA256SUMS.txt

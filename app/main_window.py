@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app import GITHUB_REPO, __version__
 from app.icons import (
     icon_size,
     loop_icon,
@@ -38,17 +39,29 @@ from app.assistant_panel import (
     show_payload_preview,
     warn_missing_key,
 )
-from app.calibration_dialog import CalibrationDialog
+from app.calibration_dialog import CalibrationDialog, CameraCalibDialog
 from app.dock_workspace import DockWorkspace, _on_screen
 from app.frame_pump import FramePump
 from app.track_panels import TrackDataPanel, TrackListPanel
 from app.track_window import TrackManagerWindow
 from app.data_views import TrackChartPanel
 from app.download_toast import DownloadToast
+from app.paths import style_path
+from app.update_checker import (
+    SETTINGS_AUTO_CHECK,
+    SETTINGS_LAST_CHECK,
+    SETTINGS_SKIPPED,
+    UpdateStatus,
+    should_auto_check,
+    status_bar_message,
+    update_checks_allowed,
+)
+from app.update_dialog import run_update_check_in_thread, show_update_result
 from app.view_toolbar import ViewToolbar
 from app.widgets import (
     AXIS_MIN_LENGTH,
     MODE_AXIS,
+    MODE_PLANE,
     MODE_RULER,
     MODE_TRACK,
     DropHint,
@@ -76,10 +89,12 @@ from ai.assistant_worker import AssistantJob, AssistantOutcome, run_assistant_in
 from ai.calibration import (
     CalibrationMode,
     CalibrationState,
+    CameraProfile,
     CoordinateFrame,
     RulerRole,
     RulerSegment,
     near_far_state,
+    planar_state,
     uniform_state,
 )
 from ai.contracts import (
@@ -103,17 +118,20 @@ from ai.desktop import (
     export_track_csv,
     new_track_id,
     read_track_project,
+    run_audit_in_thread,
     run_shake_in_thread,
     run_track_in_thread,
     run_checkpoint_download,
     write_track_project,
 )
+from ai.depth_audit import DepthAuditState
 from ai.kinematics import sample_at_frame, series_for_result
 from ai.physics import source_fingerprint
 from ai.model_manager import spec_for_mode
 from ai.sam2_tracker import merge_track_points
 from ai.schema import Point2D
 from ai.stabilize import ShakeCompensation, compensate_result
+from engine.decoder import FrameDecoder
 from engine.video_index import VideoInfo
 
 VIDEO_FILTER = (
@@ -131,7 +149,8 @@ VIDEO_SUFFIXES = {
     ".mpg",
     ".mpeg",
 }
-STYLE_PATH = Path(__file__).with_name("style.qss")
+STYLE_PATH = style_path()
+SHAKE_INVALIDATE_PX = 8.0
 
 
 class MainWindow(QMainWindow):
@@ -171,9 +190,15 @@ class MainWindow(QMainWindow):
         self._calibration = CalibrationState()
         self._show_calibration = True
         self._pending_rulers: list[RulerSegment] | None = None
+        self._pending_plane: list[Point2D] | None = None
         self._axis_undo_pushed = False
+        self._plane_undo_pushed = False
         self._axis_rotate_base: tuple[float, float] | None = None
         self._cal_drawn_before_shake = False
+        self._depth_audit = DepthAuditState()
+        self._depth_thread = None
+        self._depth_worker = None
+        self._charuco_views: list = []
         self._assistant_thread = None
         self._assistant_worker = None
         self._assistant_state = AssistantState()
@@ -185,6 +210,9 @@ class MainWindow(QMainWindow):
         self._download_worker = None
         self._download_toast: DownloadToast | None = None
         self._download_resume_track = False
+        self._update_thread = None
+        self._update_worker = None
+        self._update_manual = False
 
         self._video = VideoView()
         self._hint = DropHint()
@@ -195,6 +223,9 @@ class MainWindow(QMainWindow):
         self._video.prompted.connect(self._on_prompted)
         self._video.boxed.connect(self._on_boxed)
         self._video.ruler_drawn.connect(self._on_ruler_drawn)
+        self._video.plane_point_picked.connect(self._on_plane_point_picked)
+        self._video.plane_corner_dragged.connect(self._on_plane_corner_dragged)
+        self._video.plane_drag_finished.connect(self._on_plane_drag_finished)
         self._video.axis_dragged.connect(self._on_axis_dragged)
         self._video.axis_drag_finished.connect(self._on_axis_drag_finished)
         self._video.axis_edit_requested.connect(self._start_axis_tool)
@@ -251,6 +282,14 @@ class MainWindow(QMainWindow):
         self._cal_dialog.redraw_requested.connect(self._redraw_rulers)
         self._cal_dialog.swap_requested.connect(self._swap_pending_rulers)
         self._cal_dialog.length_changed.connect(self._on_cal_lengths)
+        self._cal_dialog.plane_size_changed.connect(self._on_plane_size_changed)
+        self._cal_dialog.charuco_requested.connect(self._on_charuco_detect)
+        self._cal_dialog.camera_calib_requested.connect(self._on_camera_calib)
+        self._cal_dialog.audit_requested.connect(self._on_depth_audit)
+        self._cal_dialog.experimental_changed.connect(self._on_experimental_correction)
+        self._camera_dialog = CameraCalibDialog(self)
+        self._camera_dialog.capture_requested.connect(self._capture_calib_view)
+        self._camera_dialog.compute_requested.connect(self._compute_camera_profile)
 
         self._frame_readout = QLabel("帧 0 / 0")
         self._frame_readout.setObjectName("frameReadout")
@@ -352,6 +391,11 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._restore_window_prefs()
         self._refresh_track_ui()
+        if update_checks_allowed():
+            self._update_startup_timer = QTimer(self)
+            self._update_startup_timer.setSingleShot(True)
+            self._update_startup_timer.timeout.connect(self._maybe_auto_check_updates)
+            self._update_startup_timer.start(2500)
 
     def _icon_button(self, icon, tooltip: str, slot) -> QPushButton:
         button = QPushButton()
@@ -567,6 +611,8 @@ class MainWindow(QMainWindow):
             if title == "坐标系":
                 set_ruler = menu.addAction("设置/重设标定尺")
                 set_ruler.triggered.connect(self._start_ruler_tool)
+                set_plane = menu.addAction("设置运动平面")
+                set_plane.triggered.connect(self._start_plane_menu)
                 set_origin = menu.addAction("设置原点")
                 set_origin.triggered.connect(self._start_origin_only)
                 set_axis = menu.addAction("设置坐标轴")
@@ -623,8 +669,22 @@ class MainWindow(QMainWindow):
                 menu.addAction("全部归位").triggered.connect(self._workspace.dock_all)
                 restore = menu.addAction("恢复默认布局")
                 restore.triggered.connect(self._restore_layout)
-            else:
-                self._add_placeholders(menu, items)
+            elif title == "帮助":
+                start = menu.addAction("快速开始")
+                start.triggered.connect(self._show_quick_start)
+                keys = menu.addAction("快捷键")
+                keys.triggered.connect(self._show_shortcuts)
+                menu.addSeparator()
+                check = menu.addAction("检查更新…")
+                check.triggered.connect(lambda: self._check_for_updates(manual=True))
+                self._auto_update_action = QAction("启动时自动检查更新", self)
+                self._auto_update_action.setCheckable(True)
+                self._auto_update_action.setChecked(self._auto_check_enabled())
+                self._auto_update_action.toggled.connect(self._on_auto_check_toggled)
+                menu.addAction(self._auto_update_action)
+                menu.addSeparator()
+                about = menu.addAction("关于 TrackLab")
+                about.triggered.connect(self._show_about)
 
     @staticmethod
     def _add_placeholders(menu, labels: list[str]) -> None:
@@ -640,6 +700,8 @@ class MainWindow(QMainWindow):
         self._stop_sam_thread()
         self._stop_assistant()
         self._stop_shake()
+        self._stop_depth_audit()
+        self._stop_update_check()
         self._stop_pump()
         if self._track_window is not None:
             self._track_window.hide()
@@ -647,7 +709,109 @@ class MainWindow(QMainWindow):
             self._assistant_window.hide()
         if self._cal_dialog is not None:
             self._cal_dialog.hide()
+        if getattr(self, "_camera_dialog", None) is not None:
+            self._camera_dialog.hide()
         super().closeEvent(event)
+
+    def _auto_check_enabled(self) -> bool:
+        value = QSettings().value(SETTINGS_AUTO_CHECK, True)
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() not in {"0", "false", "no"}
+
+    def _on_auto_check_toggled(self, checked: bool) -> None:
+        QSettings().setValue(SETTINGS_AUTO_CHECK, checked)
+
+    def _maybe_auto_check_updates(self) -> None:
+        if not update_checks_allowed() or not self._auto_check_enabled():
+            return
+        settings = QSettings()
+        try:
+            last_check = float(settings.value(SETTINGS_LAST_CHECK, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            last_check = 0.0
+        if not should_auto_check(last_check, time.time()):
+            return
+        self._check_for_updates(manual=False)
+
+    def _check_for_updates(self, *, manual: bool) -> None:
+        if self._update_thread is not None:
+            if manual:
+                self.statusBar().showMessage("正在检查更新…", 4000)
+            return
+        self._update_manual = manual
+        skipped = str(QSettings().value(SETTINGS_SKIPPED, "") or "")
+        if manual:
+            self.statusBar().showMessage("正在检查更新…")
+        thread, worker = run_update_check_in_thread(
+            __version__,
+            skipped=skipped,
+            honor_skip=not manual,
+            on_finished=self._on_update_check_finished,
+        )
+        self._update_thread = thread
+        self._update_worker = worker
+        thread.start()
+
+    def _on_update_check_finished(self, info) -> None:  # noqa: ANN001
+        manual = self._update_manual
+        self._stop_update_check()
+        QSettings().setValue(SETTINGS_LAST_CHECK, time.time())
+        choice = show_update_result(self, info, manual=manual)
+        if choice == "skip" and info.latest:
+            QSettings().setValue(SETTINGS_SKIPPED, info.latest)
+        if manual:
+            if info.status is UpdateStatus.AVAILABLE:
+                self.statusBar().clearMessage()
+            return
+        if info.status in {
+            UpdateStatus.AVAILABLE,
+            UpdateStatus.SKIPPED,
+            UpdateStatus.LATEST,
+        }:
+            return
+        self.statusBar().showMessage(status_bar_message(info), 6000)
+
+    def _stop_update_check(self) -> None:
+        if self._update_thread is not None:
+            self._update_thread.quit()
+            self._update_thread.wait(2000)
+        self._update_thread = None
+        self._update_worker = None
+
+    def _show_quick_start(self) -> None:
+        QMessageBox.information(
+            self,
+            "快速开始",
+            "1. 打开或拖入视频（mp4 / mov 等）。\n"
+            "2. 新建轨迹，框选或点击目标。快速用 Tiny 隔帧，精准用 Small 逐帧。\n"
+            "3. 用坐标系菜单设置标定尺或运动平面。\n"
+            "4. 在数据表和分图中查看结果，需要时导出 CSV / JSON。\n\n"
+            "标准安装包捆绑 Tiny 权重；精准 Small 首次使用时下载。\n"
+            "AI 离面抽检需从源码安装完整依赖。",
+        )
+
+    def _show_shortcuts(self) -> None:
+        QMessageBox.information(
+            self,
+            "快捷键",
+            "空格：播放 / 暂停\n"
+            "T：开始或取消自动跟踪\n"
+            "左右方向键：按底栏步长逐帧移动\n"
+            "I / O：设置循环起点 / 终点\n"
+            "点击画面：正点选；Shift+点击：负点；拖动：框选",
+        )
+
+    def _show_about(self) -> None:
+        QMessageBox.about(
+            self,
+            "关于 TrackLab",
+            f"TrackLab {__version__}\n\n"
+            "物理视频分析工具。快速 Tiny 随安装包提供，精准 Small 首次使用时下载。"
+            "含手工平面测量。\n"
+            "AI 离面抽检仍为可选能力。\n\n"
+            f"项目主页：https://github.com/{GITHUB_REPO}",
+        )
 
     def resizeEvent(self, event) -> None:  # noqa: ANN001
         super().resizeEvent(event)
@@ -711,6 +875,7 @@ class MainWindow(QMainWindow):
         self._stop_ai()
         self._stop_assistant()
         self._stop_shake()
+        self._stop_depth_audit()
         self._stop_pump()
         self._info = None
         self._index = 0
@@ -721,11 +886,16 @@ class MainWindow(QMainWindow):
         self._calibration = CalibrationState()
         self._reset_assistant_state()
         self._pending_rulers = None
+        self._pending_plane = None
         self._axis_undo_pushed = False
+        self._plane_undo_pushed = False
         self._cal_drawn_before_shake = False
+        self._depth_audit = DepthAuditState()
         self._video.clear_track()
         self._video_info.set_info(None)
         self._cal_dialog.hide()
+        if getattr(self, "_camera_dialog", None) is not None:
+            self._camera_dialog.hide()
         self._clear_history()
         self._video.set_frame(None)
         self._export_track_action.setEnabled(False)
@@ -747,21 +917,27 @@ class MainWindow(QMainWindow):
         self._stop_ai()
         self._stop_assistant()
         self._stop_shake()
+        self._stop_depth_audit()
         self._stop_pump()
         self._info = None
         self._index = 0
         self._shake = None
         self._calibration = CalibrationState()
         self._pending_rulers = None
+        self._pending_plane = None
         self._axis_undo_pushed = False
+        self._plane_undo_pushed = False
         self._cal_drawn_before_shake = False
         if self._pending_project is None:
             self._tracks = []
             self._active_id = None
+            self._depth_audit = DepthAuditState()
         self._clear_history()
         self._video.clear_track()
         self._video_info.set_info(None)
         self._cal_dialog.hide()
+        if getattr(self, "_camera_dialog", None) is not None:
+            self._camera_dialog.hide()
         self._video.set_frame(None)
         self._export_track_action.setEnabled(False)
         self._export_csv_action.setEnabled(False)
@@ -812,6 +988,12 @@ class MainWindow(QMainWindow):
             self._show_prompts = self._pending_project.show_prompts
             self._show_calibration = self._pending_project.show_calibration
             self._calibration = self._pending_project.calibration
+            self._depth_audit = getattr(
+                self._pending_project, "depth_audit", DepthAuditState()
+            )
+            self._cal_dialog.set_experimental_correction(
+                self._depth_audit.experimental_correction
+            )
             self._contour_action.setChecked(self._show_contours)
             self._prompt_action.setChecked(self._show_prompts)
             self._cal_overlay_action.setChecked(self._show_calibration)
@@ -1585,10 +1767,19 @@ class MainWindow(QMainWindow):
         for ruler in self._calibration.rulers:
             ruler.a = Point2D(ruler.a.x - dx, ruler.a.y - dy)
             ruler.b = Point2D(ruler.b.x - dx, ruler.b.y - dy)
+        if self._calibration.plane is not None:
+            self._calibration.plane.corners = [
+                Point2D(point.x - dx, point.y - dy) for point in self._calibration.plane.corners
+            ]
         if self._calibration.frame.origin_x is not None:
             self._calibration.frame.origin_x -= dx
         if self._calibration.frame.origin_y is not None:
             self._calibration.frame.origin_y -= dy
+        if self._calibration.mode is CalibrationMode.PLANAR:
+            shift = (dx * dx + dy * dy) ** 0.5
+            if shift >= SHAKE_INVALIDATE_PX:
+                self._calibration.camera_moved = True
+            self._calibration.validate()
 
     def _on_shake_finished(self, shake: ShakeCompensation) -> None:
         self._stop_shake()
@@ -1724,6 +1915,7 @@ class MainWindow(QMainWindow):
             self._info,
             calibration=self._calibration,
             velocity_step=self._chart_panel.velocity_step,
+            depth_audit=self._depth_audit,
         )
         self._data_panel.set_units(
             self._calibration.position_unit, self._calibration.speed_unit
@@ -1754,13 +1946,14 @@ class MainWindow(QMainWindow):
             self._info,
             calibration=self._calibration,
             velocity_step=self._chart_panel.velocity_step,
+            depth_audit=self._depth_audit,
         )
         sample = sample_at_frame(samples, self._index)
         self._view_bar.set_sample(sample)
         if (
             sample is not None
             and sample.visible
-            and self._calibration.mode is CalibrationMode.NEAR_FAR
+            and self._calibration.active
         ):
             analyzed = self._analysis_result(layer)
             point = None if analyzed is None else next(
@@ -1846,6 +2039,7 @@ class MainWindow(QMainWindow):
             self._info,
             calibration=self._calibration,
             velocity_step=self._chart_panel.velocity_step,
+            depth_audit=self._depth_audit,
         )
         self.statusBar().showMessage(f"已导出 CSV {dest}", 4000)
 
@@ -1877,6 +2071,7 @@ class MainWindow(QMainWindow):
             track_mode=self._track_mode,
             calibration=self._calibration,
             assistant=self._assistant_state,
+            depth_audit=self._depth_audit,
         )
         self.statusBar().showMessage(f"已保存项目 {dest}", 4000)
 
@@ -1899,7 +2094,9 @@ class MainWindow(QMainWindow):
     def _exit_interaction(self) -> None:
         self._video.set_interaction_mode(MODE_TRACK)
         self._pending_rulers = None
+        self._pending_plane = None
         self._axis_undo_pushed = False
+        self._plane_undo_pushed = False
         self._axis_rotate_base = None
         if self._ruler_btn is not None:
             self._ruler_btn.setChecked(False)
@@ -1908,6 +2105,9 @@ class MainWindow(QMainWindow):
         self._sync_cal_overlay()
 
     def _start_ruler_tool(self, *_args) -> None:
+        if self._cal_dialog.mode() is CalibrationMode.PLANAR:
+            self._start_plane_tool()
+            return
         if self.sender() is self._ruler_btn and self._ruler_btn is not None:
             if not self._ruler_btn.isChecked():
                 self._exit_interaction()
@@ -1921,6 +2121,7 @@ class MainWindow(QMainWindow):
             self._axis_btn.setChecked(False)
         if self._ruler_btn is not None:
             self._ruler_btn.setChecked(True)
+        self._pending_plane = None
         self._pending_rulers = []
         self._video.set_interaction_mode(MODE_RULER)
         self._cal_dialog.show()
@@ -1932,6 +2133,41 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage(hint + " Esc 取消当前步骤。")
         self._cal_dialog.set_status(hint)
+        self._sync_cal_overlay()
+
+    def _start_plane_menu(self, *_args) -> None:
+        self._cal_dialog.set_mode(CalibrationMode.PLANAR)
+        self._start_plane_tool()
+
+    def _start_plane_tool(self, *_args) -> None:
+        if self.sender() is self._ruler_btn and self._ruler_btn is not None:
+            if not self._ruler_btn.isChecked():
+                self._exit_interaction()
+                self._cal_dialog.hide()
+                return
+        if self._info is None:
+            if self._ruler_btn is not None:
+                self._ruler_btn.setChecked(False)
+            return
+        if self._axis_btn is not None:
+            self._axis_btn.setChecked(False)
+        if self._ruler_btn is not None:
+            self._ruler_btn.setChecked(True)
+        self._cal_dialog.set_mode(CalibrationMode.PLANAR)
+        self._pending_rulers = None
+        existing = self._calibration.plane
+        if existing is not None and len(existing.corners) >= 4:
+            self._pending_plane = None
+            self._cal_dialog.set_plane_size(existing.width_m, existing.height_m)
+            hint = "可拖动角点微调，或点重画重新点选。确认后点击应用。"
+        else:
+            self._pending_plane = []
+            hint = self._cal_dialog.plane_step_hint(0)
+        self._video.set_interaction_mode(MODE_PLANE)
+        self._cal_dialog.show()
+        self._cal_dialog.raise_()
+        self._cal_dialog.set_status(hint)
+        self.statusBar().showMessage(hint + " Esc 取消。")
         self._sync_cal_overlay()
 
     def _start_axis_tool(self, *_args) -> None:
@@ -1948,6 +2184,7 @@ class MainWindow(QMainWindow):
         if self._axis_btn is not None:
             self._axis_btn.setChecked(True)
         self._pending_rulers = None
+        self._pending_plane = None
         self._cal_dialog.hide()
         created = self._ensure_default_axes()
         self._video.set_interaction_mode(MODE_AXIS)
@@ -1990,7 +2227,12 @@ class MainWindow(QMainWindow):
     def _on_cal_mode_changed(self, _mode: str) -> None:
         if self._pending_rulers is not None:
             self._pending_rulers = []
-        if self._video.interaction_mode() == MODE_RULER:
+        if self._pending_plane is not None:
+            self._pending_plane = []
+        if self._cal_dialog.mode() is CalibrationMode.PLANAR:
+            self._start_plane_tool()
+            return
+        if self._video.interaction_mode() in {MODE_RULER, MODE_PLANE}:
             self._start_ruler_tool()
 
     def _on_cal_lengths(self, near_m: float, far_m: float) -> None:
@@ -2005,7 +2247,18 @@ class MainWindow(QMainWindow):
         self._show_calibration = checked
         self._video.set_show_calibration(checked)
 
+    def _on_plane_size_changed(self, _width_m: float, _height_m: float) -> None:
+        self._sync_cal_overlay()
+
     def _redraw_rulers(self) -> None:
+        if self._cal_dialog.mode() is CalibrationMode.PLANAR:
+            self._pending_plane = []
+            self._video.set_interaction_mode(MODE_PLANE)
+            if self._ruler_btn is not None:
+                self._ruler_btn.setChecked(True)
+            self._cal_dialog.set_status(self._cal_dialog.plane_step_hint(0))
+            self._sync_cal_overlay()
+            return
         self._pending_rulers = []
         self._video.set_interaction_mode(MODE_RULER)
         if self._ruler_btn is not None:
@@ -2060,6 +2313,9 @@ class MainWindow(QMainWindow):
         self._sync_cal_overlay()
 
     def _apply_pending_calibration(self) -> None:
+        if self._cal_dialog.mode() is CalibrationMode.PLANAR:
+            self._apply_pending_plane()
+            return
         if not self._pending_rulers:
             self._cal_dialog.set_status("请先画标定尺。", error=True)
             return
@@ -2108,11 +2364,94 @@ class MainWindow(QMainWindow):
         extra = " 超出覆盖区域时将提示外推。" if state.mode is CalibrationMode.NEAR_FAR else ""
         self.statusBar().showMessage(f"标定已应用，单位切换为 m / m/s。{extra}", 5000)
 
+    def _apply_pending_plane(self) -> None:
+        corners = None
+        if self._pending_plane is not None and len(self._pending_plane) >= 4:
+            corners = list(self._pending_plane[:4])
+        elif self._calibration.plane is not None and len(self._calibration.plane.corners) >= 4:
+            corners = list(self._calibration.plane.corners[:4])
+        if corners is None:
+            self._cal_dialog.set_status("请依次点选原点、X 端、对角点和 Y 端。", error=True)
+            return
+        width_m, height_m = self._cal_dialog.plane_size()
+        frame = self._calibration.frame
+        camera = self._calibration.camera
+        if self._info is not None:
+            if camera is None:
+                camera = CameraProfile(width=self._info.width, height=self._info.height)
+            else:
+                camera.width = self._info.width
+                camera.height = self._info.height
+        state = planar_state(
+            corners,
+            width_m=width_m,
+            height_m=height_m,
+            origin=frame.origin,
+            axis_angle_deg=frame.axis_angle_deg,
+            camera=camera,
+            y_up=frame.y_up,
+        )
+        ok, message = state.validate()
+        if not ok or state.mode is CalibrationMode.NONE:
+            self._cal_dialog.set_status(state.warning or message, error=True)
+            return
+        self._push_undo()
+        self._calibration = state
+        self._pending_plane = None
+        if self._shake is None:
+            self._cal_drawn_before_shake = True
+        note = state.warning or "标定已应用。"
+        self._cal_dialog.set_status(note)
+        self._exit_interaction()
+        self._cal_dialog.hide()
+        self._refresh_track_ui()
+        extra = " 未配置镜头内参时精度会下降。" if not state.camera or not state.camera.has_intrinsics else ""
+        self.statusBar().showMessage(f"运动平面已应用，单位切换为 m / m/s。{extra}", 5000)
+
+    def _on_plane_point_picked(self, x: float, y: float) -> None:
+        if self._pending_plane is None:
+            self._pending_plane = []
+        if len(self._pending_plane) >= 4:
+            return
+        sx, sy = self._video_to_stable(x, y)
+        self._pending_plane.append(Point2D(sx, sy))
+        hint = self._cal_dialog.plane_step_hint(len(self._pending_plane))
+        self._cal_dialog.set_status(hint)
+        self.statusBar().showMessage(hint, 4000)
+        self._sync_cal_overlay()
+
+    def _on_plane_corner_dragged(self, index: int, x: float, y: float) -> None:
+        sx, sy = self._video_to_stable(x, y)
+        if self._pending_plane is not None:
+            if 0 <= index < len(self._pending_plane):
+                self._pending_plane[index] = Point2D(sx, sy)
+            self._sync_cal_overlay()
+            return
+        if self._calibration.plane is None or not (0 <= index < len(self._calibration.plane.corners)):
+            return
+        if not self._plane_undo_pushed:
+            self._push_undo()
+            self._plane_undo_pushed = True
+            if self._shake is None:
+                self._cal_drawn_before_shake = True
+        self._calibration.plane.corners[index] = Point2D(sx, sy)
+        self._calibration.validate()
+        self._sync_cal_overlay()
+
+    def _on_plane_drag_finished(self) -> None:
+        self._plane_undo_pushed = False
+        if self._pending_plane is None and self._calibration.mode is CalibrationMode.PLANAR:
+            self._refresh_track_ui()
+
     def _clear_calibration(self) -> None:
         self._push_undo()
         frame = self._calibration.frame
-        self._calibration = CalibrationState(frame=frame)
+        self._calibration = CalibrationState(frame=frame, camera=self._calibration.camera)
         self._pending_rulers = None
+        self._pending_plane = None
+        self._depth_audit = DepthAuditState(
+            experimental_correction=self._cal_dialog.experimental_correction()
+        )
         self._exit_interaction()
         self._refresh_track_ui()
         self.statusBar().showMessage("已清除标定尺，单位恢复为 px。", 4000)
@@ -2198,7 +2537,170 @@ class MainWindow(QMainWindow):
             self._video.set_axis_overlay(ov, x_end, y_end, f"x ({unit})", f"y ({unit})")
         else:
             self._video.set_axis_overlay(None, None, None, "", "")
+        self._sync_plane_overlay()
         self._video.set_show_calibration(self._show_calibration)
+
+    def _sync_plane_overlay(self) -> None:
+        corners: list[Point2D] = []
+        if self._pending_plane is not None:
+            corners = list(self._pending_plane)
+        elif self._calibration.plane is not None:
+            corners = list(self._calibration.plane.corners)
+        mapped = [self._stable_to_video(point.x, point.y) for point in corners]
+        grid_video: list[tuple[float, float, float, float]] = []
+        label = ""
+        if len(corners) >= 4:
+            width_m, height_m = self._cal_dialog.plane_size()
+            if self._pending_plane is None and self._calibration.plane is not None:
+                width_m = self._calibration.plane.width_m
+                height_m = self._calibration.plane.height_m
+            preview = planar_state(
+                corners,
+                width_m=width_m,
+                height_m=height_m,
+                camera=self._calibration.camera,
+            )
+            if preview.mode is CalibrationMode.PLANAR and preview.plane is not None:
+                for x0, y0, x1, y1 in preview.grid_lines():
+                    a = self._stable_to_video(x0, y0)
+                    b = self._stable_to_video(x1, y1)
+                    grid_video.append((a[0], a[1], b[0], b[1]))
+                label = f"RMS {preview.plane.reprojection_rms_px:.2f} px"
+                if preview.warning:
+                    label += " · " + preview.warning.split("；")[0]
+        self._video.set_plane_overlay(mapped, grid_video, label)
+
+    def _stop_depth_audit(self) -> None:
+        if self._depth_worker is not None:
+            self._depth_worker.cancel()
+        if self._depth_thread is not None:
+            self._depth_thread.quit()
+            self._depth_thread.wait(5000)
+        self._depth_thread = None
+        self._depth_worker = None
+
+    def _current_rgb(self):
+        if self._info is None:
+            return None
+        decoder = FrameDecoder(self._info)
+        try:
+            return decoder.frame(self._index)
+        finally:
+            decoder.close()
+
+    def _on_charuco_detect(self) -> None:
+        from ai.charuco import detect_plane_from_frame
+
+        rgb = self._current_rgb()
+        if rgb is None:
+            self._cal_dialog.set_status("请先打开视频。", error=True)
+            return
+        detection, message = detect_plane_from_frame(rgb, camera=self._calibration.camera)
+        if detection is None:
+            self._cal_dialog.set_status(message, error=True)
+            return
+        self._pending_plane = [
+            Point2D(*self._video_to_stable(point.x, point.y)) for point in detection.corners
+        ]
+        self._cal_dialog.set_plane_size(detection.width_m, detection.height_m)
+        self._cal_dialog.set_status("已检测棋盘格四角，确认宽高后点击应用。")
+        self.statusBar().showMessage("ChArUco 平面已填入四个角点。", 4000)
+        self._sync_cal_overlay()
+
+    def _on_camera_calib(self) -> None:
+        from ai.charuco import opencv_available
+
+        if not opencv_available():
+            self._cal_dialog.set_status(
+                "未安装 OpenCV。可选：python -m pip install opencv-contrib-python",
+                error=True,
+            )
+            return
+        self._charuco_views = []
+        self._camera_dialog.set_status("在不同角度显示棋盘格，采集至少 3 张后计算内参。")
+        self._camera_dialog.show()
+        self._camera_dialog.raise_()
+
+    def _capture_calib_view(self) -> None:
+        from ai.charuco import collect_calibration_view
+
+        rgb = self._current_rgb()
+        if rgb is None:
+            self._camera_dialog.set_status("请先打开视频。", error=True)
+            return
+        corners, ids, message = collect_calibration_view(rgb)
+        if corners is None or ids is None:
+            self._camera_dialog.set_status(message, error=True)
+            return
+        self._charuco_views.append((corners, ids))
+        self._camera_dialog.set_status(f"已采集 {len(self._charuco_views)} 张。至少 3 张后可计算内参。")
+
+    def _compute_camera_profile(self) -> None:
+        from ai.charuco import calibrate_camera
+
+        if self._info is None:
+            self._camera_dialog.set_status("请先打开视频。", error=True)
+            return
+        profile, message = calibrate_camera(
+            self._charuco_views, (self._info.width, self._info.height)
+        )
+        if profile is None:
+            self._camera_dialog.set_status(message, error=True)
+            return
+        self._push_undo()
+        self._calibration.camera = profile
+        self._calibration.validate()
+        rms = "" if profile.rms is None else f" RMS {profile.rms:.3f} px"
+        self._camera_dialog.set_status(f"镜头内参已保存。{rms}")
+        self._cal_dialog.set_status(f"已写入镜头内参。{rms}")
+        self._refresh_track_ui()
+
+    def _on_experimental_correction(self, enabled: bool) -> None:
+        self._depth_audit.experimental_correction = enabled
+        self._refresh_track_ui()
+
+    def _on_depth_audit(self) -> None:
+        layer = self._active_layer()
+        analyzed = self._analysis_result(layer)
+        if self._info is None or analyzed is None:
+            self._cal_dialog.set_status("需要已跟踪的轨迹才能抽检。", error=True)
+            return
+        if self._calibration.mode is not CalibrationMode.PLANAR or not self._calibration.active:
+            self._cal_dialog.set_status("离面抽检需要已应用的运动平面。", error=True)
+            return
+        if self._depth_worker is not None:
+            self._cal_dialog.set_status("正在抽检…")
+            return
+        self._cal_dialog.set_status("正在进行 AI 离面抽检…")
+        thread, worker = run_audit_in_thread(
+            self._info.path,
+            analyzed,
+            self._calibration,
+            experimental_correction=self._cal_dialog.experimental_correction(),
+            on_finished=self._on_depth_audit_finished,
+            on_failed=self._on_depth_audit_failed,
+        )
+        self._depth_thread = thread
+        self._depth_worker = worker
+        thread.start()
+
+    def _on_depth_audit_finished(self, state) -> None:  # noqa: ANN001
+        self._stop_depth_audit()
+        self._depth_audit = state
+        self._cal_dialog.set_experimental_correction(state.experimental_correction)
+        self._cal_dialog.set_status(state.message or "离面抽检完成。")
+        off = len(state.off_plane_frames())
+        self.statusBar().showMessage(
+            state.message or f"离面抽检完成，{off} 帧告警。",
+            6000,
+        )
+        self._refresh_track_ui()
+
+    def _on_depth_audit_failed(self, message: str) -> None:
+        self._stop_depth_audit()
+        text = message or "离面抽检失败"
+        self._cal_dialog.set_status(text, error=True)
+        self.statusBar().showMessage(text, 6000)
 
     def _restore_window_prefs(self) -> None:
         if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
@@ -2370,9 +2872,11 @@ class MainWindow(QMainWindow):
             self._info,
             calibration=self._calibration,
             velocity_step=self._chart_panel.velocity_step,
+            depth_audit=self._depth_audit,
         )
 
     def _teaching_context(self) -> dict:
+        plane = self._calibration.plane
         return build_teaching_context(
             self._assistant_state.analysis,
             confirmed_type=self._assistant_state.confirmed_type,
@@ -2381,6 +2885,11 @@ class MainWindow(QMainWindow):
             pendulum_length_m=self._assistant_state.pendulum_length_m,
             stale=self._assistant_state.stale,
             interpolated=self._active_track_interpolated(),
+            calibration_mode=self._calibration.mode.value,
+            reprojection_rms_px=None if plane is None else plane.reprojection_rms_px,
+            off_plane_frames=len(self._depth_audit.off_plane_frames()),
+            camera_moved=self._calibration.camera_moved,
+            quality_label=self._calibration.quality_label(),
         )
 
     def _active_track_interpolated(self) -> bool:

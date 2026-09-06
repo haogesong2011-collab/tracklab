@@ -76,6 +76,11 @@ def build_teaching_context(
     pendulum_length_m: float | None = None,
     stale: bool = False,
     interpolated: bool = False,
+    calibration_mode: str | None = None,
+    reprojection_rms_px: float | None = None,
+    off_plane_frames: int = 0,
+    camera_moved: bool = False,
+    quality_label: str | None = None,
 ) -> dict[str, Any]:
     candidate = _confirmed_candidate(analysis, confirmed_type)
     formulas = formulas_for(confirmed_type) if confirmed_type else catalog_payload()["formulas"]
@@ -99,6 +104,11 @@ def build_teaching_context(
         "warnings": warnings,
         "representative_points": representative_points(samples or []),
         "pendulum_length_m": pendulum_length_m,
+        "calibration_mode": calibration_mode,
+        "reprojection_rms_px": reprojection_rms_px,
+        "off_plane_frames": off_plane_frames,
+        "camera_moved": camera_moved,
+        "quality_label": quality_label,
         "notes": [
             "representative_points 只含压缩后的拐点，不是逐帧轨迹",
             "数值由本地拟合给出，模型不得改写",

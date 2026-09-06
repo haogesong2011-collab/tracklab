@@ -38,6 +38,7 @@ from engine.video_index import VideoInfo
 MODE_TRACK = "track"
 MODE_RULER = "ruler"
 MODE_AXIS = "axis"
+MODE_PLANE = "plane"
 
 AXIS_MIN_LENGTH = 360.0
 AXIS_SPAN_FRACTION = 0.62
@@ -200,6 +201,9 @@ class VideoView(QWidget):
     axis_drag_finished = Signal()
     axis_edit_requested = Signal()
     interaction_cancelled = Signal()
+    plane_point_picked = Signal(float, float)
+    plane_corner_dragged = Signal(int, float, float)
+    plane_drag_finished = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -235,6 +239,10 @@ class VideoView(QWidget):
         self._rulers: list[tuple[float, float, float, float, str, str]] = []
         self._axis_overlay: tuple[float, float, float, float, float, float, str, str] | None = None
         self._show_calibration = True
+        self._plane_corners: list[tuple[float, float]] = []
+        self._plane_grid: list[tuple[float, float, float, float]] = []
+        self._plane_label = ""
+        self._plane_drag: int | None = None
 
     def zoom(self) -> float:
         return self._zoom
@@ -329,8 +337,11 @@ class VideoView(QWidget):
         self._press = None
         self._press_video = None
         self._axis_drag = None
+        self._plane_drag = None
         if mode == MODE_AXIS:
             self.setCursor(Qt.CursorShape.OpenHandCursor)
+        elif mode == MODE_PLANE:
+            self.setCursor(Qt.CursorShape.CrossCursor)
         else:
             self.unsetCursor()
         if mode != MODE_TRACK:
@@ -349,6 +360,17 @@ class VideoView(QWidget):
         self, rulers: list[tuple[float, float, float, float, str, str]]
     ) -> None:
         self._rulers = list(rulers)
+        self.update()
+
+    def set_plane_overlay(
+        self,
+        corners: list[tuple[float, float]],
+        grid: list[tuple[float, float, float, float]] | None = None,
+        label: str = "",
+    ) -> None:
+        self._plane_corners = list(corners)
+        self._plane_grid = list(grid or [])
+        self._plane_label = label
         self.update()
 
     def set_axis_overlay(
@@ -379,6 +401,10 @@ class VideoView(QWidget):
         self._axis_overlay = None
         self._draft = None
         self._axis_origin = None
+        self._plane_corners = []
+        self._plane_grid = []
+        self._plane_label = ""
+        self._plane_drag = None
         self.update()
 
     def clear_track(self) -> None:
@@ -465,6 +491,18 @@ class VideoView(QWidget):
             or _point_seg_dist(px, py, ox, oy, yx, yy) <= threshold
         )
 
+    def _plane_hit(self, video: tuple[float, float]) -> int | None:
+        if len(self._plane_corners) < 1:
+            return None
+        threshold = self._hit_threshold_video() * 1.4
+        px, py = video
+        best: tuple[float, int] | None = None
+        for index, (x, y) in enumerate(self._plane_corners):
+            dist = math.hypot(px - x, py - y)
+            if dist <= threshold and (best is None or dist < best[0]):
+                best = (dist, index)
+        return None if best is None else best[1]
+
     def _update_axis_cursor(self, pos: QPointF) -> None:
         if self._mode != MODE_AXIS or self._axis_drag is not None:
             return
@@ -498,6 +536,23 @@ class VideoView(QWidget):
             self._press = event.position()
             self._press_video = video
             self._press_button = event.button()
+            return
+        if self._mode == MODE_PLANE:
+            if event.button() != Qt.MouseButton.LeftButton:
+                super().mousePressEvent(event)
+                return
+            video = self._video_xy(event.position())
+            if video is None:
+                super().mousePressEvent(event)
+                return
+            self._press = event.position()
+            self._press_video = video
+            self._press_button = event.button()
+            hit = self._plane_hit(video) if len(self._plane_corners) >= 4 else None
+            if hit is not None:
+                self._plane_drag = hit
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                self.plane_corner_dragged.emit(hit, video[0], video[1])
             return
         if self._mode == MODE_AXIS:
             if event.button() != Qt.MouseButton.LeftButton:
@@ -565,6 +620,16 @@ class VideoView(QWidget):
             self._draft = (*self._press_video, *current)
             self.update()
             return
+        if self._mode == MODE_PLANE:
+            if self._plane_drag is not None:
+                current = self._video_xy(event.position())
+                if current is None:
+                    return
+                self.plane_corner_dragged.emit(
+                    self._plane_drag, current[0], current[1]
+                )
+                return
+            return
         if self._mode == MODE_AXIS:
             if self._axis_drag is not None:
                 current = self._video_xy(event.position())
@@ -608,6 +673,22 @@ class VideoView(QWidget):
             self._press_video = None
             self._press_button = Qt.MouseButton.NoButton
             self._draft = None
+            self.update()
+            return
+        if self._mode == MODE_PLANE:
+            if self._press_video is None or event.button() != self._press_button:
+                super().mouseReleaseEvent(event)
+                return
+            if self._plane_drag is not None:
+                self.plane_drag_finished.emit()
+            elif len(self._plane_corners) < 4:
+                current = self._video_xy(event.position()) or self._press_video
+                self.plane_point_picked.emit(current[0], current[1])
+            self._plane_drag = None
+            self._press = None
+            self._press_video = None
+            self._press_button = Qt.MouseButton.NoButton
+            self.setCursor(Qt.CursorShape.CrossCursor)
             self.update()
             return
         if self._mode == MODE_AXIS:
@@ -668,6 +749,7 @@ class VideoView(QWidget):
             self._press = None
             self._press_video = None
             self._axis_drag = None
+            self._plane_drag = None
             self.interaction_cancelled.emit()
             event.accept()
             return
@@ -820,11 +902,27 @@ class VideoView(QWidget):
     def _map_video(self, dest: QRectF, sx: float, sy: float, x: float, y: float) -> QPointF:
         return QPointF(dest.x() + x * sx, dest.y() + y * sy)
 
+    @staticmethod
+    def _draw_halo_text(
+        painter: QPainter,
+        pos: QPointF,
+        text: str,
+        color: QColor,
+        halo: QColor | None = None,
+    ) -> None:
+        outline = halo or QColor(0, 0, 0, 210)
+        for dx, dy in ((-1, -1), (-1, 1), (1, -1), (1, 1), (-1, 0), (1, 0), (0, -1), (0, 1)):
+            painter.setPen(outline)
+            painter.drawText(pos + QPointF(dx, dy), text)
+        painter.setPen(color)
+        painter.drawText(pos, text)
+
     def _paint_calibration(
         self, painter: QPainter, dest: QRectF, sx: float, sy: float
     ) -> None:
         font = QFont(painter.font())
-        font.setPixelSize(11)
+        font.setPixelSize(13)
+        font.setBold(True)
         painter.setFont(font)
         accent = QColor("#80cbc4")
         for x0, y0, x1, y1, label, role in self._rulers:
@@ -837,8 +935,7 @@ class VideoView(QWidget):
             painter.drawEllipse(QRectF(p1.x() - 3.5, p1.y() - 3.5, 7, 7))
             mid = QPointF((p0.x() + p1.x()) / 2, (p0.y() + p1.y()) / 2 - 8)
             text = label if not role else f"{role} {label}"
-            painter.setPen(QColor("#d8fff8"))
-            painter.drawText(mid, text)
+            self._draw_halo_text(painter, mid, text, QColor("#ffffff"))
         if self._axis_overlay is not None:
             ox, oy, xx, xy, yx, yy, xlabel, ylabel = self._axis_overlay
             origin = self._map_video(dest, sx, sy, ox, oy)
@@ -856,6 +953,7 @@ class VideoView(QWidget):
                 rotate_r=rotate_r,
                 interactive=interactive,
             )
+        self._paint_plane(painter, dest, sx, sy)
         if self._draft is not None:
             x0, y0, x1, y1 = self._draft
             painter.setPen(QPen(QColor("#f0c14b"), 1.6, Qt.PenStyle.DashLine))
@@ -863,6 +961,42 @@ class VideoView(QWidget):
                 self._map_video(dest, sx, sy, x0, y0),
                 self._map_video(dest, sx, sy, x1, y1),
             )
+
+    def _paint_plane(
+        self, painter: QPainter, dest: QRectF, sx: float, sy: float
+    ) -> None:
+        corners = self._plane_corners
+        if not corners:
+            return
+        mapped = [self._map_video(dest, sx, sy, x, y) for x, y in corners]
+        fill = QColor(128, 203, 196, 36)
+        edge = QColor("#80cbc4")
+        if len(mapped) >= 4:
+            path = QPainterPath()
+            path.moveTo(mapped[0])
+            for point in mapped[1:4]:
+                path.lineTo(point)
+            path.closeSubpath()
+            painter.setPen(QPen(edge, 1.8))
+            painter.setBrush(fill)
+            painter.drawPath(path)
+        painter.setPen(QPen(QColor("#4db6ac"), 1.0, Qt.PenStyle.DotLine))
+        for x0, y0, x1, y1 in self._plane_grid:
+            painter.drawLine(
+                self._map_video(dest, sx, sy, x0, y0),
+                self._map_video(dest, sx, sy, x1, y1),
+            )
+        labels = ("原点", "X 端", "对角点", "Y 端")
+        painter.setBrush(edge)
+        for index, point in enumerate(mapped):
+            painter.setPen(QPen(QColor(0, 0, 0, 140), 2.0))
+            painter.drawEllipse(QRectF(point.x() - 4.5, point.y() - 4.5, 9, 9))
+            painter.setPen(QColor("#d8fff8"))
+            name = labels[index] if index < len(labels) else str(index + 1)
+            painter.drawText(QPointF(point.x() + 8, point.y() - 6), f"{index + 1} {name}")
+        if self._plane_label:
+            painter.setPen(QColor("#d8fff8"))
+            painter.drawText(mapped[0] + QPointF(8, 16), self._plane_label)
 
     def _draw_axis_frame(
         self,

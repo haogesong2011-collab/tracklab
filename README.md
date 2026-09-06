@@ -1,6 +1,6 @@
 # TrackLab
 
-物理视频分析工具（Tracker 工作流的重做）。当前版本是 Tracker 风格的 SAM 2 跟踪工作台：导入视频、多轨点选/框选目标、异步传播掩膜质心轨迹。
+物理视频分析工具（Tracker 工作流的重做）。当前版本是 Tracker 风格的 SAM 2 跟踪工作台：导入视频、多轨点选/框选目标、异步传播掩膜质心轨迹。快速模式用 Tiny 隔帧插值，精准模式用 Small 逐帧。另有平面测量、GitHub 更新检查，以及可选的 macOS DMG。
 
 ## 运行
 
@@ -74,7 +74,11 @@ python -m tests.ai.evaluate --split ci --model sam2
 提交前可跑小型 CI（目标 <2 分钟）：
 
 ```bash
-python -m tests.ai.ci
+TRACKLAB_SKIP_UPDATE_CHECK=1 python -m tests.ai.ci
 ```
+
+查看版本：`.venv/bin/python3 -m app --version`
+
+macOS 安装包由 `.github/workflows/release-macos.yml` 在打 `v*` tag 时构建。本地打包见 `macos-packaging/build_macos.sh`（捆绑 Tiny 权重；精准 Small 首次使用时下载）。
 
 数据约定见 [datasets/README.md](datasets/README.md)。Holdout 槽位（约 20%）选型期间禁止调参。

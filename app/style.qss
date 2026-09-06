@@ -463,7 +463,32 @@ QDockWidget::close-button:hover, QDockWidget::float-button:hover {
 
 #calibrationDialog {
     background: #232323;
-    color: #dedede;
+    color: #f5f5f5;
+}
+#calibrationDialog QLabel,
+#calibrationDialog QRadioButton,
+#calibrationDialog QCheckBox {
+    color: #f5f5f5;
+    background: transparent;
+}
+#calibrationDialog QRadioButton::indicator,
+#calibrationDialog QCheckBox::indicator {
+    background: #2d2d2d;
+    border: 1px solid #6a6a6a;
+    width: 13px;
+    height: 13px;
+    border-radius: 7px;
+}
+#calibrationDialog QCheckBox::indicator {
+    border-radius: 3px;
+}
+#calibrationDialog QRadioButton::indicator:checked,
+#calibrationDialog QCheckBox::indicator:checked {
+    background: #80cbc4;
+    border-color: #80cbc4;
+}
+#calibrationDialog #panelHint {
+    color: #e6e6e6;
 }
 #calLengthSpin {
     background: #2d2d2d;
