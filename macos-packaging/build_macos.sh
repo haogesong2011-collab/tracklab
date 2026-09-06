@@ -22,6 +22,9 @@ ARCH="$(uname -m)"
 APP="$ROOT/dist/TrackLab.app"
 DMG="$ROOT/dist/TrackLab-${ARCH}.dmg"
 
+chmod -R u+w "$APP" "$ROOT/dist/TrackLab" "$ROOT/build/pyinstaller" 2>/dev/null || true
+rm -rf "$APP" "$ROOT/dist/TrackLab" "$ROOT/build/pyinstaller"
+
 "$PYTHON" macos-packaging/make_icon.py
 "$PYTHON" - <<'PY'
 from ai.model_manager import DEFAULT_SPEC, ensure_checkpoint
