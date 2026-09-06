@@ -379,6 +379,58 @@ QSlider#timeline::handle:horizontal {
     max-height: 10px;
 }
 #trackProgress::chunk { background: #6cb6ff; }
+
+#downloadToast {
+    background: #2b2b2b;
+    color: #e6e6e6;
+    border: 1px solid #3e3e3e;
+    border-radius: 6px;
+}
+#downloadToastTitle {
+    color: #f0f0f0;
+    font-size: 13px;
+    font-weight: 600;
+}
+#downloadToastDetail {
+    color: #a8a8a8;
+    font-size: 11px;
+}
+#downloadToastStatus {
+    color: #c8c8c8;
+    font-size: 11px;
+}
+#downloadToastBar {
+    background: #1c1c1c;
+    border: 1px solid #3a3a3a;
+    min-height: 8px;
+    max-height: 8px;
+    border-radius: 2px;
+}
+#downloadToastBar::chunk {
+    background: #0078d4;
+    border-radius: 2px;
+}
+#downloadToastCancel {
+    background: transparent;
+    color: #c8c8c8;
+    border: 1px solid #4a4a4a;
+    border-radius: 4px;
+    padding: 2px 10px;
+    min-height: 22px;
+    font-size: 11px;
+}
+#downloadToastCancel:hover { background: #3a3a3a; color: #f0f0f0; }
+#downloadToastCancel:disabled { color: #6a6a6a; border-color: #3a3a3a; }
+
+#chartScrubReadout {
+    background: #2a2a2a;
+    color: #e8e8e8;
+    border: 1px solid #4a4a4a;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 11px;
+}
+
 QSplitter::handle { background: #333333; }
 QStatusBar {
     background: #1a1a1a;

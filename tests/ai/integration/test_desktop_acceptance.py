@@ -97,6 +97,10 @@ class DesktopAcceptanceTests(unittest.TestCase):
 
         self.assertNotIn("app.frame_pump", inspect.getsource(assistant_worker))
         self.assertNotIn("FramePump", inspect.getsource(AssistantWorker.run))
+        from ai.desktop import CheckpointDownloadWorker
+
+        self.assertNotIn("frame_pump", inspect.getsource(CheckpointDownloadWorker))
+        self.assertNotIn("FramePump", inspect.getsource(CheckpointDownloadWorker.run))
 
     def test_track_frames_cover_decoder_indices(self) -> None:
         from ai.models import ColorBlobTracker, load_video
@@ -286,6 +290,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
         window.close()
 
     def test_view_bar_chart_and_manual_edit(self) -> None:
+        from PySide6.QtCharts import QLineSeries, QScatterSeries
         from PySide6.QtCore import Qt
         from PySide6.QtGui import QColor
         from PySide6.QtWidgets import QApplication
@@ -336,10 +341,21 @@ class DesktopAcceptanceTests(unittest.TestCase):
         x_segments = sum(
             1
             for series in window._chart_panel._charts[0]._series
-            if series.pen().color() == QColor("#6cb6ff")
+            if isinstance(series, QLineSeries) and series.pen().color() == QColor("#6cb6ff")
         )
         self.assertEqual(x_segments, 2)
+        x_dots = next(
+            series
+            for series in window._chart_panel._charts[0]._series
+            if isinstance(series, QScatterSeries)
+            and series.color() == QColor("#6cb6ff")
+            and series.count() == 4
+        )
+        self.assertEqual(x_dots.count(), 4)
+        self.assertLess(x_dots.markerSize(), 5)
         chart = window._chart_panel._charts[0]
+        self.assertAlmostEqual(chart._active_dot.markerSize(), 6.0)
+        self.assertEqual(chart._active_dot.count(), 1)
         span0 = chart._axis_time.max() - chart._axis_time.min()
         chart.zoom_at(2.0, (chart._axis_time.min() + chart._axis_time.max()) / 2, 0.0)
         self.assertAlmostEqual(chart._zoom, 2.0, places=3)
@@ -347,6 +363,11 @@ class DesktopAcceptanceTests(unittest.TestCase):
         window._chart_panel.reset_zoom()
         self.assertAlmostEqual(chart._zoom, 1.0, places=3)
         self.assertAlmostEqual(chart._axis_time.max() - chart._axis_time.min(), span0, places=4)
+        time_step = chart._axis_time.tickInterval()
+        value_step = chart._axis_value.tickInterval()
+        self.assertGreater(time_step, 0)
+        self.assertGreaterEqual(value_step, 1.0 - 1e-9)
+        self.assertEqual(chart._axis_value.labelFormat(), "%.0f")
         window._apply_track_overlay(3)
         self.assertEqual(window._video._track_index, 3)
         self.assertEqual(window._video._overlays[0].points[3][0], 3)
@@ -377,6 +398,112 @@ class DesktopAcceptanceTests(unittest.TestCase):
         window._view_bar._updating = False
         window._view_bar._on_track_changed(1)
         self.assertEqual(received, [window._tracks[1].track_id])
+        window.close()
+
+    def test_chart_scrub_shows_sample_readout(self) -> None:
+        from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+        from PySide6.QtWidgets import QApplication
+
+        from app.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        _ = app
+        window = MainWindow()
+        window._new_track()
+        window._tracks[0].result = TrackResult(
+            clip_id="c",
+            points=[
+                TrackPoint(frame=0, x=1, y=2),
+                TrackPoint(frame=1, x=2, y=2),
+                TrackPoint(frame=2, x=9, y=9, visible=False),
+                TrackPoint(frame=3, x=5, y=6),
+                TrackPoint(frame=4, x=6, y=6),
+            ],
+        )
+        window._refresh_track_ui()
+        window.show()
+        window.resize(1280, 800)
+        QApplication.processEvents()
+        chart = window._chart_panel._charts[0]
+        chart.resize(420, 180)
+        QApplication.processEvents()
+        scrubbed: list[int] = []
+        chart.frame_activated.connect(scrubbed.append)
+        area = chart.chart().plotArea()
+        y = int(area.center().y()) if area.height() > 8 else chart.height() // 2
+        x0 = int(area.left() + 12) if area.width() > 40 else 24
+        x1 = int(area.right() - 12) if area.width() > 40 else max(80, chart.width() - 24)
+        viewport = chart.viewport()
+
+        def send(typ, pos: QPoint, button, buttons) -> None:
+            event = QMouseEvent(
+                typ,
+                QPointF(pos),
+                viewport.mapToGlobal(pos),
+                button,
+                buttons,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            QApplication.sendEvent(viewport, event)
+            QApplication.processEvents()
+
+        send(
+            QEvent.Type.MouseButtonPress,
+            QPoint(x0, y),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+        )
+        self.assertTrue(chart._readout.isVisible())
+        self.assertIn("帧", chart._readout.text())
+        self.assertIn("t =", chart._readout.text())
+        send(
+            QEvent.Type.MouseMove,
+            QPoint(x1, y),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+        )
+        send(
+            QEvent.Type.MouseButtonRelease,
+            QPoint(x1, y),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+        )
+        self.assertTrue(scrubbed)
+        self.assertGreaterEqual(len(set(scrubbed)), 2)
+        self.assertTrue(chart._readout.isHidden())
+        window.close()
+
+    def test_download_toast_sits_bottom_right(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        from ai.model_manager import SAM21_TINY
+        from app.download_toast import DownloadToast, format_bytes
+        from app.main_window import MainWindow
+
+        self.assertEqual(format_bytes(1536), "1.5 KB")
+        self.assertEqual(format_bytes(10 * 1024 * 1024), "10.0 MB")
+        app = QApplication.instance() or QApplication(sys.argv)
+        _ = app
+        window = MainWindow()
+        window.resize(1280, 800)
+        window.show()
+        QApplication.processEvents()
+        toast = DownloadToast(window)
+        toast.set_download(SAM21_TINY)
+        toast.set_progress(10 * 1024 * 1024, 40 * 1024 * 1024)
+        toast.show()
+        toast.reposition()
+        QApplication.processEvents()
+        self.assertIn("Tiny", toast._title.text())
+        self.assertIn("25%", toast._status.text())
+        center = window.mapToGlobal(window.rect().center())
+        self.assertGreater(toast.x(), center.x())
+        self.assertGreater(toast.y(), center.y())
+        toast.set_stage("verify")
+        self.assertIn("SHA-256", toast._status.text())
+        toast.set_finished()
+        self.assertEqual(toast._title.text(), "下载完成")
         window.close()
 
     def test_undo_and_redo_track_edits(self) -> None:
@@ -508,6 +635,38 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertEqual(old.schema, "tracklab.project.v2")
         self.assertEqual(old.calibration.mode, CalibrationMode.NONE)
 
+    def test_track_mode_project_roundtrip_and_menu(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        from ai.contracts import TrackMode
+        from app.main_window import MainWindow
+
+        result = TrackResult(
+            clip_id="demo",
+            points=[TrackPoint(frame=0, x=1, y=2, interpolated=True)],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fast.json"
+            write_track_project(
+                path,
+                Path("/tmp/clip.mp4"),
+                result,
+                track_mode=TrackMode.FAST,
+            )
+            doc = read_track_project(path)
+        self.assertEqual(doc.track_mode, TrackMode.FAST)
+        self.assertTrue(doc.tracks[0].result.points[0].interpolated)
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        _ = app
+        window = MainWindow()
+        self.assertEqual(window._track_mode, TrackMode.PRECISE)
+        self.assertTrue(window._precise_track_action.isChecked())
+        window._set_track_mode(TrackMode.FAST, announce=False)
+        self.assertTrue(window._fast_track_action.isChecked())
+        self.assertEqual(window._track_mode, TrackMode.FAST)
+        window.close()
+
     def test_low_confidence_yellow_and_calibration_units(self) -> None:
         from PySide6.QtCharts import QScatterSeries
         from PySide6.QtGui import QColor
@@ -540,12 +699,16 @@ class DesktopAcceptanceTests(unittest.TestCase):
         window._index = 1
         window._sync_view_bar()
         self.assertNotIn("#f0c14b", window._view_bar._fields["x"].styleSheet())
-        scatter_count = sum(
-            1
+        scatters = [
+            series
             for series in window._chart_panel._charts[0].chart().series()
             if isinstance(series, QScatterSeries)
-        )
-        self.assertEqual(scatter_count, 1)
+        ]
+        self.assertEqual(sorted(series.count() for series in scatters), [1, 1, 2])
+        self.assertTrue(any(series.color() == warn for series in scatters))
+        chart = window._chart_panel._charts[0]
+        self.assertEqual(chart._active_dot.count(), 1)
+        self.assertAlmostEqual(chart._active_dot.markerSize(), 6.0)
 
         window._push_undo()
         window._calibration = uniform_state(

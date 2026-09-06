@@ -8,13 +8,120 @@ from typing import Any
 
 import numpy as np
 
-from ai.contracts import CancelToken, ProgressCb, PromptKind, TrackPrompt
+from ai.contracts import CancelToken, ProgressCb, PromptKind, TrackPrompt, TrackPoint
+from ai.geometry import interpolate_xy
 from ai.models import _emit
 from engine.decoder import FrameDecoder
 from engine.video_index import VideoInfo
 
 IMG_MEAN = (0.485, 0.456, 0.406)
 IMG_STD = (0.229, 0.224, 0.225)
+
+
+def sampled_frame_indices(
+    start: int,
+    last: int,
+    stride: int = 1,
+    extra: list[int] | tuple[int, ...] | None = None,
+) -> list[int]:
+    """Frames to run SAM on: start, start+stride, …, last, plus prompt frames."""
+    if last < start:
+        return []
+    step = max(1, int(stride))
+    frames = set(range(start, last + 1, step))
+    frames.add(start)
+    frames.add(last)
+    if extra:
+        for frame in extra:
+            if start <= int(frame) <= last:
+                frames.add(int(frame))
+    return sorted(frames)
+
+
+def densify_track_points(
+    sampled: list[TrackPoint],
+    start: int,
+    last: int,
+) -> list[TrackPoint]:
+    """Fill [start, last]. Interpolate only between two visible sampled points."""
+    if last < start:
+        return []
+    by_frame = {point.frame: point for point in sampled}
+    ordered = sorted(by_frame.values(), key=lambda point: point.frame)
+    filled: list[TrackPoint] = []
+    for frame in range(start, last + 1):
+        existing = by_frame.get(frame)
+        if existing is not None:
+            filled.append(
+                TrackPoint(
+                    frame=existing.frame,
+                    x=existing.x,
+                    y=existing.y,
+                    visible=existing.visible,
+                    confidence=existing.confidence,
+                    manual=existing.manual,
+                    interpolated=False,
+                )
+            )
+            continue
+        prev = next_pt = None
+        for point in ordered:
+            if point.frame < frame:
+                prev = point
+            elif point.frame > frame:
+                next_pt = point
+                break
+        if (
+            prev is not None
+            and next_pt is not None
+            and prev.visible
+            and next_pt.visible
+        ):
+            xy = interpolate_xy(
+                [(prev.frame, prev.x, prev.y), (next_pt.frame, next_pt.x, next_pt.y)],
+                frame,
+            )
+            if xy is not None:
+                filled.append(
+                    TrackPoint(
+                        frame=frame,
+                        x=xy[0],
+                        y=xy[1],
+                        visible=True,
+                        confidence=min(prev.confidence, next_pt.confidence),
+                        interpolated=True,
+                    )
+                )
+                continue
+        source = prev if prev is not None else next_pt
+        filled.append(
+            TrackPoint(
+                frame=frame,
+                x=0.0 if source is None else source.x,
+                y=0.0 if source is None else source.y,
+                visible=False,
+                confidence=0.0,
+                interpolated=False,
+            )
+        )
+    return filled
+
+
+def remap_prompts_to_samples(
+    prompts: list[TrackPrompt],
+    sampled: list[int],
+    seed_xy: tuple[float, float],
+) -> list[TrackPrompt]:
+    index = {frame: i for i, frame in enumerate(sampled)}
+    remapped: list[TrackPrompt] = []
+    for prompt in prompts:
+        if prompt.frame in index:
+            remapped.append(replace(prompt, frame=index[prompt.frame]))
+    if remapped:
+        return remapped
+    return [
+        TrackPrompt(frame=0, kind=PromptKind.POSITIVE, x=seed_xy[0], y=seed_xy[1])
+    ]
 
 
 def shift_prompts(
@@ -39,31 +146,39 @@ def load_frames_for_sam2(
     offload_video_to_cpu: bool = True,
     progress: ProgressCb | None = None,
     cancel: CancelToken | None = None,
+    frame_indices: list[int] | None = None,
 ):
-    """Decode [start, last] with FrameDecoder and match SAM 2's ImageNet tensor layout."""
-    import torch
-    import torch.nn.functional as F
+    """Decode selected frames and match SAM 2's ImageNet tensor layout.
 
-    total = last - start + 1
+    RGB is scaled to `image_size` first so 1080p is not bilinear-filtered at
+    native resolution.
+    """
+    import torch
+
+    if frame_indices is None:
+        indices = list(range(start, last + 1))
+    else:
+        indices = list(frame_indices)
+    total = len(indices)
     if total <= 0:
         raise ValueError("empty frame range")
     decoder = FrameDecoder(info)
     chunks: list = []
     try:
-        for i in range(start, last + 1):
+        for n, i in enumerate(indices):
             if cancel and cancel.cancelled:
                 break
             rgb = decoder.frame(i)
             tensor = torch.from_numpy(np.ascontiguousarray(rgb)).permute(2, 0, 1)
             tensor = tensor.unsqueeze(0).float()
-            tensor = F.interpolate(
+            tensor = torch.nn.functional.interpolate(
                 tensor,
                 size=(image_size, image_size),
                 mode="bilinear",
                 align_corners=False,
             )
             chunks.append(tensor.squeeze(0))
-            _emit(progress, info.path.stem, i - start + 1, total, "decode")
+            _emit(progress, info.path.stem, n + 1, total, "decode")
     finally:
         decoder.close()
     if not chunks:

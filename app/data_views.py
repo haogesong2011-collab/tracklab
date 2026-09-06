@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QScatterSeries, QValueAxis
-from PySide6.QtCore import QMargins, QPointF, Qt, Signal
+from PySide6.QtCore import QEvent, QMargins, QObject, QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QComboBox,
@@ -26,8 +26,34 @@ from ai.kinematics import (
     fit_quantity,
     is_low_confidence,
 )
+from app.chart_ticks import nice_axis_ticks, nice_tick_interval
 
 WARN = QColor("#f0c14b")
+DOT_SIZE = 3.5
+ACTIVE_DOT_SIZE = 6.0
+
+
+def _configure_axis(
+    axis: QValueAxis, lo: float, hi: float, target: int, *, expand: bool
+) -> None:
+    if expand:
+        nmin, nmax, step, fmt = nice_axis_ticks(lo, hi, target)
+        axis.setRange(nmin, nmax)
+    else:
+        step, fmt = nice_tick_interval(lo, hi, target)
+        if hi <= lo:
+            hi = lo + 1.0
+        axis.setRange(lo, hi)
+    axis.setLabelFormat(fmt)
+    axis.setMinorTickCount(0)
+    tick_type = getattr(QValueAxis, "TickType", None)
+    if tick_type is not None:
+        axis.setTickType(QValueAxis.TickType.TicksDynamic)
+        axis.setTickInterval(step)
+    else:
+        span = axis.max() - axis.min()
+        count = max(2, int(round(span / step)) + 1) if step else 5
+        axis.setTickCount(min(count, 12))
 
 
 VX_NAME = "vₓ"
@@ -62,6 +88,8 @@ class TrackChartView(QChartView):
         self.setStyleSheet("background: #232323; border: none;")
         self.setMinimumSize(150, 80)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setDragMode(QChartView.DragMode.NoDrag)
+        self.setRubberBand(QChartView.RubberBand.NoRubberBand)
         self._specs = specs
         self._samples: list[KinematicSample] = []
         self._series: list[QLineSeries] = []
@@ -74,6 +102,14 @@ class TrackChartView(QChartView):
         self._fit_degree = 0
         self._fit_series: QLineSeries | None = None
         self._fit_result: QuantityFit | None = None
+        self._dragging = False
+        self._last_scrub_frame: int | None = None
+        self._readout = QLabel(self.viewport())
+        self._readout.setObjectName("chartScrubReadout")
+        self._readout.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._readout.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self._readout.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._readout.hide()
 
         chart = QChart()
         panel = QColor("#232323")
@@ -81,6 +117,7 @@ class TrackChartView(QChartView):
         chart.setPlotAreaBackgroundBrush(panel)
         chart.setPlotAreaBackgroundVisible(True)
         chart.setDropShadowEnabled(False)
+        chart.setAnimationOptions(QChart.AnimationOption.NoAnimation)
         chart.legend().hide()
         chart.setBackgroundRoundness(0)
         chart.setMargins(QMargins(8, 12, 10, 10))
@@ -88,6 +125,8 @@ class TrackChartView(QChartView):
         if layout is not None:
             layout.setContentsMargins(4, 4, 4, 4)
         self.setChart(chart)
+        self._readout.setParent(self.viewport())
+        self.viewport().installEventFilter(self)
 
         self._axis_time = QValueAxis()
         self._axis_value = QValueAxis()
@@ -97,8 +136,7 @@ class TrackChartView(QChartView):
             axis.setGridLineColor(QColor("#2f2f2f"))
             axis.setLinePenColor(QColor("#4a4a4a"))
             axis.setTitleText(title)
-            axis.setLabelFormat("%g")
-            axis.setTickCount(5)
+            axis.setMinorTickCount(0)
         chart.addAxis(self._axis_time, Qt.AlignmentFlag.AlignBottom)
         chart.addAxis(self._axis_value, Qt.AlignmentFlag.AlignLeft)
 
@@ -112,6 +150,18 @@ class TrackChartView(QChartView):
         self._cursor.attachAxis(self._axis_time)
         self._cursor.attachAxis(self._axis_value)
         for marker in chart.legend().markers(self._cursor):
+            marker.setVisible(False)
+
+        self._active_dot = QScatterSeries()
+        self._active_dot.setName("")
+        self._active_dot.setMarkerSize(ACTIVE_DOT_SIZE)
+        color = QColor(self._specs[0][2])
+        self._active_dot.setColor(color)
+        self._active_dot.setBorderColor(color)
+        chart.addSeries(self._active_dot)
+        self._active_dot.attachAxis(self._axis_time)
+        self._active_dot.attachAxis(self._axis_value)
+        for marker in chart.legend().markers(self._active_dot):
             marker.setVisible(False)
 
     def set_spec(self, attr: str, name: str, color: str, y_title: str) -> None:
@@ -148,14 +198,16 @@ class TrackChartView(QChartView):
             self._center_v = None
             self._apply_view()
             self._cursor.clear()
+            self._active_dot.clear()
             return
 
         for attr, name, color in self._specs:
             first = True
+            qcolor = QColor(color)
             for segment in contiguous_segments(samples, attr):
                 series = QLineSeries()
                 series.setName(name if first else "")
-                series.setPen(QPen(QColor(color), 1.8))
+                series.setPen(QPen(qcolor, 1.0))
                 for sample in segment:
                     series.append(sample.time_s, float(getattr(sample, attr)))
                 chart.addSeries(series)
@@ -163,26 +215,43 @@ class TrackChartView(QChartView):
                 series.attachAxis(self._axis_value)
                 self._series.append(series)
                 first = False
-            scatter = QScatterSeries()
-            scatter.setName("")
-            scatter.setMarkerSize(7)
-            scatter.setColor(WARN)
-            scatter.setBorderColor(WARN)
+            dots = QScatterSeries()
+            dots.setName("")
+            dots.setMarkerSize(DOT_SIZE)
+            dots.setColor(qcolor)
+            dots.setBorderColor(qcolor)
+            for sample in samples:
+                value = getattr(sample, attr)
+                if value is None:
+                    continue
+                dots.append(sample.time_s, float(value))
+            if dots.count():
+                chart.addSeries(dots)
+                dots.attachAxis(self._axis_time)
+                dots.attachAxis(self._axis_value)
+                self._series.append(dots)
+            warn = QScatterSeries()
+            warn.setName("")
+            warn.setMarkerSize(DOT_SIZE)
+            warn.setColor(WARN)
+            warn.setBorderColor(WARN)
             has_low = False
             for sample in samples:
                 value = getattr(sample, attr)
                 if value is None or not is_low_confidence(sample):
                     continue
-                scatter.append(sample.time_s, float(value))
+                warn.append(sample.time_s, float(value))
                 has_low = True
             if has_low:
-                chart.addSeries(scatter)
-                scatter.attachAxis(self._axis_time)
-                scatter.attachAxis(self._axis_value)
-                self._series.append(scatter)  # type: ignore[arg-type]
+                chart.addSeries(warn)
+                warn.attachAxis(self._axis_time)
+                warn.attachAxis(self._axis_value)
+                self._series.append(warn)
             self._apply_fit(chart, samples, attr, color)
 
         self._fit_axes(samples)
+        self._style_active_dot()
+        self._raise_overlay_series()
         for marker in chart.legend().markers():
             if not marker.series().name():
                 marker.setVisible(False)
@@ -205,35 +274,137 @@ class TrackChartView(QChartView):
                 QPointF(time_s, self._axis_value.max()),
             ]
         )
+        self._active_dot.clear()
+        if not self._samples or not self._specs:
+            return
+        nearest = min(self._samples, key=lambda s: abs(s.time_s - time_s))
+        attr = self._specs[0][0]
+        value = getattr(nearest, attr)
+        if value is None:
+            return
+        self._active_dot.append(nearest.time_s, float(value))
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: ANN001
+    def _style_active_dot(self) -> None:
+        color = QColor(self._specs[0][2])
+        self._active_dot.setColor(color)
+        self._active_dot.setBorderColor(color)
+
+    def _raise_overlay_series(self) -> None:
+        chart = self.chart()
+        for series in (self._active_dot, self._cursor):
+            chart.removeSeries(series)
+            chart.addSeries(series)
+            series.attachAxis(self._axis_time)
+            series.attachAxis(self._axis_value)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: ANN001
+        if watched is self.viewport() and isinstance(event, QMouseEvent):
+            et = event.type()
+            if et == QEvent.Type.MouseButtonPress:
+                return self._on_scrub_press(event)
+            if et == QEvent.Type.MouseMove:
+                return self._on_scrub_move(event)
+            if et == QEvent.Type.MouseButtonRelease:
+                return self._on_scrub_release(event)
+            if et == QEvent.Type.MouseButtonDblClick:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._stop_scrub()
+                    self.reset_zoom()
+                    return True
+        return super().eventFilter(watched, event)
+
+    def _on_scrub_press(self, event: QMouseEvent) -> bool:
         if event.button() != Qt.MouseButton.LeftButton or not self._samples:
-            super().mousePressEvent(event)
-            return
-        series = self._series[0] if self._series else self._cursor
-        value = self.chart().mapToValue(event.position(), series)
-        nearest = min(self._samples, key=lambda s: abs(s.time_s - value.x()))
-        self.frame_activated.emit(nearest.frame)
-        super().mousePressEvent(event)
+            return False
+        sample = self._nearest_sample(event.position())
+        if sample is None:
+            return False
+        self._dragging = True
+        self.viewport().setCursor(Qt.CursorShape.SizeHorCursor)
+        self._activate_sample(sample, event.position())
+        return True
 
-    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: ANN001
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.reset_zoom()
-            event.accept()
-            return
-        super().mouseDoubleClickEvent(event)
+    def _on_scrub_move(self, event: QMouseEvent) -> bool:
+        if not self._dragging or not self._samples:
+            return False
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            self._stop_scrub()
+            return False
+        sample = self._nearest_sample(event.position())
+        if sample is not None:
+            self._activate_sample(sample, event.position())
+        return True
+
+    def _on_scrub_release(self, event: QMouseEvent) -> bool:
+        if not self._dragging or event.button() != Qt.MouseButton.LeftButton:
+            return False
+        sample = self._nearest_sample(event.position())
+        if sample is not None:
+            self._activate_sample(sample, event.position())
+        self._stop_scrub()
+        return True
+
+    def _stop_scrub(self) -> None:
+        self._dragging = False
+        self._last_scrub_frame = None
+        self.viewport().unsetCursor()
+        self._hide_readout()
 
     def resizeEvent(self, event) -> None:  # noqa: ANN001
         super().resizeEvent(event)
+        if getattr(self, "_axis_time", None) is None:
+            return
         narrow = self.width() < 280
         short = self.height() < 140
         self._axis_value.setTitleVisible(not narrow)
         self._axis_time.setTitleVisible(not short)
-        self._axis_value.setTickCount(4 if short else 5)
-        self._axis_time.setTickCount(4 if narrow else 5)
         chart = self.chart()
         if chart is not None:
             chart.update()
+
+    def _tick_targets(self) -> tuple[int, int]:
+        time_n = 4 if self.width() < 240 else (5 if self.width() < 420 else 6)
+        value_n = 3 if self.height() < 100 else (4 if self.height() < 160 else 5)
+        return time_n, value_n
+
+    def _nearest_sample(self, pos: QPointF) -> KinematicSample | None:
+        if not self._samples:
+            return None
+        series = self._series[0] if self._series else self._cursor
+        value = self.chart().mapToValue(pos, series)
+        return min(self._samples, key=lambda s: abs(s.time_s - value.x()))
+
+    def _activate_sample(self, sample: KinematicSample, pos: QPointF) -> None:
+        self.highlight_time(sample.time_s)
+        if sample.frame != self._last_scrub_frame:
+            self._last_scrub_frame = sample.frame
+            self.frame_activated.emit(sample.frame)
+        self._show_readout(sample, pos)
+
+    def _show_readout(self, sample: KinematicSample, pos: QPointF) -> None:
+        attr, name, _color = self._specs[0]
+        value = getattr(sample, attr)
+        unit = sample.position_unit if attr in {"x", "y"} else sample.speed_unit
+        if value is None:
+            val_text = "—" if sample.visible else "—（不可见）"
+        else:
+            val_text = f"{value:.2f} {unit}"
+            if not sample.visible:
+                val_text += "（不可见）"
+        self._readout.setText(
+            f"帧 {sample.frame + 1}  ·  t = {sample.time_s:.2f} s\n{name} = {val_text}"
+        )
+        self._readout.adjustSize()
+        host = self._readout.parentWidget() or self
+        x = int(pos.x()) + 14
+        y = int(pos.y()) - self._readout.height() - 10
+        x = max(6, min(x, max(6, host.width() - self._readout.width() - 6)))
+        y = max(6, min(y, max(6, host.height() - self._readout.height() - 6)))
+        self._readout.move(x, y)
+        self._readout.show()
+
+    def _hide_readout(self) -> None:
+        self._readout.hide()
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: ANN001
         if not self._samples:
@@ -287,18 +458,24 @@ class TrackChartView(QChartView):
         )
 
     def _apply_view(self) -> None:
+        if getattr(self, "_axis_time", None) is None:
+            return
         t0, t1 = self._fitted_t
         v0, v1 = self._fitted_v
-        if self._zoom <= 1.0001 and self._center_t is None:
-            self._axis_time.setRange(t0, t1)
-            self._axis_value.setRange(v0, v1)
+        expand = self._zoom <= 1.0001 and self._center_t is None
+        if expand:
+            win_t0, win_t1 = t0, t1
+            win_v0, win_v1 = v0, v1
         else:
             tspan = (t1 - t0) / self._zoom
             vspan = (v1 - v0) / self._zoom
             ct = self._center_t if self._center_t is not None else (t0 + t1) / 2.0
             cv = self._center_v if self._center_v is not None else (v0 + v1) / 2.0
-            self._axis_time.setRange(ct - tspan / 2.0, ct + tspan / 2.0)
-            self._axis_value.setRange(cv - vspan / 2.0, cv + vspan / 2.0)
+            win_t0, win_t1 = ct - tspan / 2.0, ct + tspan / 2.0
+            win_v0, win_v1 = cv - vspan / 2.0, cv + vspan / 2.0
+        time_n, value_n = self._tick_targets()
+        _configure_axis(self._axis_time, win_t0, win_t1, time_n, expand=expand)
+        _configure_axis(self._axis_value, win_v0, win_v1, value_n, expand=expand)
         if self._highlight_t is not None:
             self.highlight_time(self._highlight_t)
 
@@ -313,16 +490,14 @@ class TrackChartView(QChartView):
         t0, t1 = min(times), max(times)
         if t1 <= t0:
             t1 = t0 + 1.0
-        pad = (t1 - t0) * 0.04
-        self._fitted_t = (t0 - pad, t1 + pad)
+        self._fitted_t = (t0, t1)
         if self._fit_result is not None:
             vals.extend(self._fit_result.evaluate(t0 + (t1 - t0) * i / 20.0) for i in range(21))
         if vals:
             lo, hi = min(vals), max(vals)
             if lo == hi:
                 lo, hi = lo - 1, hi + 1
-            span = hi - lo
-            self._fitted_v = (lo - span * 0.08, hi + span * 0.08)
+            self._fitted_v = (lo, hi)
         else:
             self._fitted_v = (-1.0, 1.0)
         self._apply_view()
@@ -375,7 +550,7 @@ class TrackChartPanel(QWidget):
         header = QHBoxLayout()
         header.setContentsMargins(6, 2, 6, 0)
         header.setSpacing(8)
-        hint = QLabel("滚轮缩放，双击复位")
+        hint = QLabel("按住拖动调进度，滚轮缩放，双击复位")
         hint.setObjectName("panelHint")
         step_label = QLabel("步长")
         step_label.setObjectName("panelHint")
@@ -427,16 +602,6 @@ class TrackChartPanel(QWidget):
             combo.currentIndexChanged.connect(
                 lambda _i, view=chart, box=combo: self._apply_quantity(view, box)
             )
-            minus = QPushButton("－")
-            minus.setObjectName("panelButton")
-            minus.setFixedWidth(28)
-            minus.setToolTip("缩小")
-            minus.clicked.connect(chart.zoom_out)
-            plus = QPushButton("＋")
-            plus.setObjectName("panelButton")
-            plus.setFixedWidth(28)
-            plus.setToolTip("放大")
-            plus.clicked.connect(chart.zoom_in)
             self._selects.append(combo)
             self._charts.append(chart)
 
@@ -451,8 +616,6 @@ class TrackChartPanel(QWidget):
             equation.hide()
             row_layout.addWidget(combo, stretch=0)
             row_layout.addWidget(equation, stretch=1)
-            row_layout.addWidget(minus)
-            row_layout.addWidget(plus)
             self._fit_labels.append(equation)
             layout.addWidget(row)
             layout.addWidget(chart, stretch=1)

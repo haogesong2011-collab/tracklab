@@ -7,11 +7,13 @@
 ```bash
 cd ~/Projects/tracklab
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-# 桌面 SAM 2 跟踪（可选）：pip install -r requirements-ai.txt
-python -m app
+.venv/bin/python3 -m pip install -r requirements.txt
+# 桌面 SAM 2 跟踪（可选）：.venv/bin/python3 -m pip install -r requirements-ai.txt
+.venv/bin/python3 -m app
+# 或：./run.sh
 ```
+
+不要用系统的 `python3 -m app`。有的 Mac 上 `python3` 始终指向 `/Library/Frameworks/Python.framework/...`，虚拟环境里的包它看不见。
 
 打开窗口后，把 mp4 / mov 等文件拖进去，或点「打开」/ 点击中央区域。打开是秒开的，进度条一格一帧。
 

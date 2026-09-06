@@ -75,6 +75,7 @@ def build_teaching_context(
     teaching_level: TeachingLevel = TeachingLevel.HIGH,
     pendulum_length_m: float | None = None,
     stale: bool = False,
+    interpolated: bool = False,
 ) -> dict[str, Any]:
     candidate = _confirmed_candidate(analysis, confirmed_type)
     formulas = formulas_for(confirmed_type) if confirmed_type else catalog_payload()["formulas"]
@@ -83,6 +84,8 @@ def build_teaching_context(
     missing = list(analysis.missing) if analysis else ["analysis"]
     if stale:
         warnings.append("数据已变化，以下结果可能过期")
+    if interpolated:
+        warnings.append("轨迹含 Tiny 插值，测 g 请改精准（Small）后重跟")
     payload = {
         "role": "tracklab_teaching_context",
         "teaching_level": teaching_level.value,

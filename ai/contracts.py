@@ -12,6 +12,15 @@ from ai.schema import POSE_KEYPOINTS
 LOW_CONFIDENCE = 0.60
 
 
+class TrackMode(str, Enum):
+    FAST = "fast"
+    PRECISE = "precise"
+
+
+FAST_TRACK_STRIDE = 3
+FAST_TRACK_IMAGE_SIZE = 512
+
+
 class FailureReason(str, Enum):
     NONE = "none"
     LOW_CONFIDENCE = "low_confidence"
@@ -32,6 +41,7 @@ class TrackPoint:
     visible: bool = True
     confidence: float = 1.0
     manual: bool = False
+    interpolated: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TrackPoint":
@@ -42,6 +52,7 @@ class TrackPoint:
             visible=bool(data.get("visible", True)),
             confidence=float(data.get("confidence", 1.0)),
             manual=bool(data.get("manual", False)),
+            interpolated=bool(data.get("interpolated", False)),
         )
 
 

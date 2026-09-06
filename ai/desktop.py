@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal
+from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 
 from ai.assistant_report import render_report_markdown
 from ai.calibration import CalibrationState
@@ -25,11 +25,13 @@ from ai.contracts import (
     CancelToken,
     ProgressEvent,
     TrackLayer,
+    TrackMode,
     TrackPoint,
     TrackPrompt,
     TrackResult,
 )
 from ai.kinematics import DEFAULT_VELOCITY_STEP, series_for_result
+from ai.model_manager import DownloadCancelled, ModelNotAvailable, ModelSpec, ensure_checkpoint
 from ai.models import ColorBlobTracker, load_video
 from ai.schema import Point2D
 from ai.stabilize import ShakeCompensation, estimate_shake
@@ -74,6 +76,7 @@ class ProjectDocument:
     show_contours: bool = True
     show_prompts: bool = True
     show_calibration: bool = True
+    track_mode: TrackMode = TrackMode.PRECISE
     calibration: CalibrationState = field(default_factory=CalibrationState)
     assistant: AssistantState = field(default_factory=AssistantState)
 
@@ -84,6 +87,7 @@ class TrackWorker(QObject):
     progress = Signal(object)
     finished = Signal(object)
     failed = Signal(str)
+    start_requested = Signal()
 
     def __init__(
         self,
@@ -96,6 +100,7 @@ class TrackWorker(QObject):
         end_frame: int | None = None,
         prompts: list[TrackPrompt] | None = None,
         tracker=None,  # noqa: ANN001
+        track_mode: TrackMode = TrackMode.PRECISE,
     ) -> None:
         super().__init__(parent)
         self._path = Path(video_path)
@@ -106,18 +111,25 @@ class TrackWorker(QObject):
         self._end_frame = end_frame
         self._prompts = list(prompts or [])
         self._tracker = tracker
+        self._track_mode = track_mode
 
     def cancel(self) -> None:
         self._token.cancel()
 
+    @Slot()
     def run(self) -> None:
         try:
             info = load_video(self._path)
             tracker = self._tracker
+            stride = 1
+            image_size = None
             if tracker is None:
                 from ai.sam2_tracker import Sam2Tracker
+                from ai.sam_runtime import SamRuntime, settings_for_mode
 
-                tracker = Sam2Tracker()
+                spec, stride, image_size = settings_for_mode(self._track_mode)
+                predictor = SamRuntime.instance().predictor_for(spec)
+                tracker = Sam2Tracker(predictor=predictor, spec=spec)
 
             def on_progress(event: ProgressEvent) -> None:
                 self.progress.emit(event)
@@ -130,6 +142,8 @@ class TrackWorker(QObject):
                 start_frame=self._start_frame,
                 end_frame=self._end_frame,
                 prompts=self._prompts,
+                stride=stride,
+                image_size=image_size,
             )
             result.track_id = self.track_id  # type: ignore[attr-defined]
             self.finished.emit(result)
@@ -165,6 +179,45 @@ class ShakeWorker(QObject):
             self.failed.emit(str(exc))
 
 
+class CheckpointDownloadWorker(QObject):
+    """Download SAM weights off the UI thread. Never reuse FramePump."""
+
+    progress = Signal(int, int)
+    stage = Signal(str)
+    finished = Signal(str)
+    failed = Signal(str)
+    cancelled = Signal()
+
+    def __init__(self, spec: ModelSpec, parent=None) -> None:  # noqa: ANN001
+        super().__init__(parent)
+        self._spec = spec
+        self._token = CancelToken()
+
+    def cancel(self) -> None:
+        self._token.cancel()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            path = ensure_checkpoint(
+                self._spec,
+                download=True,
+                progress=self.progress.emit,
+                stage=self.stage.emit,
+                cancel=self._token,
+            )
+            if self._token.cancelled:
+                self.cancelled.emit()
+                return
+            self.finished.emit(str(path))
+        except DownloadCancelled:
+            self.cancelled.emit()
+        except (ModelNotAvailable, OSError) as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+
+
 def run_track_in_thread(
     video_path: Path,
     seed: tuple[float, float],
@@ -177,9 +230,10 @@ def run_track_in_thread(
     end_frame: int | None = None,
     prompts: list[TrackPrompt] | None = None,
     tracker=None,  # noqa: ANN001
+    track_mode: TrackMode = TrackMode.PRECISE,
+    thread: QThread | None = None,
 ) -> tuple[QThread, TrackWorker]:
-    """Spawn a dedicated QThread — never reuse FramePump's thread."""
-    thread = QThread()
+    """Spawn or queue a track job. Never reuse FramePump's thread."""
     worker = TrackWorker(
         video_path,
         seed,
@@ -188,17 +242,25 @@ def run_track_in_thread(
         end_frame=end_frame,
         prompts=prompts,
         tracker=tracker,
+        track_mode=track_mode,
     )
+    owned = thread is None
+    if thread is None:
+        thread = QThread()
     worker.moveToThread(thread)
-    thread.started.connect(worker.run)
+    worker.start_requested.connect(worker.run, Qt.ConnectionType.QueuedConnection)
     if on_progress:
         worker.progress.connect(on_progress, Qt.ConnectionType.QueuedConnection)
     if on_finished:
         worker.finished.connect(on_finished, Qt.ConnectionType.QueuedConnection)
     if on_failed:
         worker.failed.connect(on_failed, Qt.ConnectionType.QueuedConnection)
-    worker.finished.connect(thread.quit)
-    worker.failed.connect(thread.quit)
+    if owned:
+        thread.started.connect(worker.run)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+    else:
+        worker.start_requested.emit()
     return thread, worker
 
 
@@ -222,6 +284,36 @@ def run_shake_in_thread(
         worker.failed.connect(on_failed, Qt.ConnectionType.QueuedConnection)
     worker.finished.connect(thread.quit)
     worker.failed.connect(thread.quit)
+    return thread, worker
+
+
+def run_checkpoint_download(
+    spec: ModelSpec,
+    *,
+    on_progress: Callable[[int, int], None] | None = None,
+    on_stage: Callable[[str], None] | None = None,
+    on_finished: Callable[[str], None] | None = None,
+    on_failed: Callable[[str], None] | None = None,
+    on_cancelled: Callable[[], None] | None = None,
+) -> tuple[QThread, CheckpointDownloadWorker]:
+    """Download and verify a SAM checkpoint on a dedicated QThread."""
+    thread = QThread()
+    worker = CheckpointDownloadWorker(spec)
+    worker.moveToThread(thread)
+    thread.started.connect(worker.run)
+    if on_progress is not None:
+        worker.progress.connect(on_progress, Qt.ConnectionType.QueuedConnection)
+    if on_stage is not None:
+        worker.stage.connect(on_stage, Qt.ConnectionType.QueuedConnection)
+    if on_finished is not None:
+        worker.finished.connect(on_finished, Qt.ConnectionType.QueuedConnection)
+    if on_failed is not None:
+        worker.failed.connect(on_failed, Qt.ConnectionType.QueuedConnection)
+    if on_cancelled is not None:
+        worker.cancelled.connect(on_cancelled, Qt.ConnectionType.QueuedConnection)
+    worker.finished.connect(thread.quit)
+    worker.failed.connect(thread.quit)
+    worker.cancelled.connect(thread.quit)
     return thread, worker
 
 
@@ -295,6 +387,7 @@ def write_track_project(
     show_contours: bool = True,
     show_prompts: bool = True,
     show_calibration: bool = True,
+    track_mode: TrackMode = TrackMode.PRECISE,
     calibration: CalibrationState | None = None,
     assistant: AssistantState | None = None,
 ) -> None:
@@ -315,6 +408,7 @@ def write_track_project(
             "contours": show_contours,
             "prompts": show_prompts,
             "calibration": show_calibration,
+            "track_mode": track_mode.value,
         },
         "calibration": (calibration or CalibrationState()).to_dict(),
         "tracks": [layer.to_dict() for layer in layers],
@@ -349,9 +443,18 @@ def read_track_project(path: Path) -> ProjectDocument:
         show_contours=bool(display.get("contours", True)),
         show_prompts=bool(display.get("prompts", True)),
         show_calibration=bool(display.get("calibration", True)),
+        track_mode=_track_mode_from_display(display),
         calibration=CalibrationState.from_dict(raw.get("calibration")),
         assistant=AssistantState.from_dict(raw.get("assistant")),
     )
+
+
+def _track_mode_from_display(display: dict) -> TrackMode:
+    raw = display.get("track_mode", TrackMode.PRECISE.value)
+    try:
+        return TrackMode(str(raw))
+    except ValueError:
+        return TrackMode.PRECISE
 
 
 def export_assistant_report(path: Path, markdown: str) -> None:

@@ -104,6 +104,14 @@ class AssistantContextTests(unittest.TestCase):
         self.assertIn(79, frames)
         self.assertIn(10, frames)
 
+    def test_interpolated_track_warns_for_gravity(self) -> None:
+        context = build_teaching_context(
+            _analysis(),
+            confirmed_type=ExperimentType.FREE_FALL,
+            interpolated=True,
+        )
+        self.assertTrue(any("Tiny 插值" in item for item in context["warnings"]))
+
     def test_formulas_come_from_catalog_not_model(self) -> None:
         context = build_teaching_context(
             _analysis(),

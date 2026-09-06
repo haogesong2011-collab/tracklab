@@ -7,8 +7,8 @@ from pathlib import Path
 
 from datetime import datetime
 
-from PySide6.QtCore import QByteArray, QEvent, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QImage, QKeySequence
+from PySide6.QtCore import QByteArray, QEvent, QSettings, QThread, Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup, QDragEnterEvent, QDropEvent, QImage, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -44,6 +44,7 @@ from app.frame_pump import FramePump
 from app.track_panels import TrackDataPanel, TrackListPanel
 from app.track_window import TrackManagerWindow
 from app.data_views import TrackChartPanel
+from app.download_toast import DownloadToast
 from app.view_toolbar import ViewToolbar
 from app.widgets import (
     AXIS_MIN_LENGTH,
@@ -90,6 +91,7 @@ from ai.contracts import (
     PromptKind,
     TeachingLevel,
     TrackLayer,
+    TrackMode,
     TrackPrompt,
     TrackResult,
 )
@@ -103,11 +105,12 @@ from ai.desktop import (
     read_track_project,
     run_shake_in_thread,
     run_track_in_thread,
+    run_checkpoint_download,
     write_track_project,
 )
 from ai.kinematics import sample_at_frame, series_for_result
 from ai.physics import source_fingerprint
-from ai.model_manager import DEFAULT_SPEC
+from ai.model_manager import spec_for_mode
 from ai.sam2_tracker import merge_track_points
 from ai.schema import Point2D
 from ai.stabilize import ShakeCompensation, compensate_result
@@ -150,6 +153,8 @@ class MainWindow(QMainWindow):
         self._deadline = 0.0
         self._ai_thread = None
         self._ai_worker = None
+        self._sam_thread: QThread | None = None
+        self._track_mode = TrackMode.PRECISE
         self._shake_thread = None
         self._shake_worker = None
         self._shake: ShakeCompensation | None = None
@@ -176,6 +181,10 @@ class MainWindow(QMainWindow):
         self._chat_model = DEFAULT_CHAT_MODEL
         self._report_model = DEFAULT_REPORT_MODEL
         self._assistant_transport = None
+        self._download_thread: QThread | None = None
+        self._download_worker = None
+        self._download_toast: DownloadToast | None = None
+        self._download_resume_track = False
 
         self._video = VideoView()
         self._hint = DropHint()
@@ -213,7 +222,7 @@ class MainWindow(QMainWindow):
         self._data_panel = TrackDataPanel()
         self._data_panel.frame_activated.connect(self._show_frame)
         self._chart_panel = TrackChartPanel()
-        self._chart_panel.frame_activated.connect(self._show_frame)
+        self._chart_panel.frame_activated.connect(self._on_chart_frame_activated)
         self._chart_panel.velocity_step_changed.connect(self._refresh_track_ui)
         self._assistant_panel = AssistantPanel()
         self._assistant_panel.analyze_requested.connect(self._analyze_experiment)
@@ -499,6 +508,22 @@ class MainWindow(QMainWindow):
         self._cancel_ai_action.setEnabled(False)
         self._cancel_ai_action.triggered.connect(self._cancel_ai_track)
         track_menu.addAction(self._cancel_ai_action)
+        mode_group = QActionGroup(self)
+        mode_group.setExclusive(True)
+        self._fast_track_action = QAction("快速预览（Tiny）", self)
+        self._fast_track_action.setCheckable(True)
+        self._precise_track_action = QAction("精准分析（Small）", self)
+        self._precise_track_action.setCheckable(True)
+        self._precise_track_action.setChecked(True)
+        mode_group.addAction(self._fast_track_action)
+        mode_group.addAction(self._precise_track_action)
+        self._fast_track_action.triggered.connect(lambda: self._set_track_mode(TrackMode.FAST))
+        self._precise_track_action.triggered.connect(
+            lambda: self._set_track_mode(TrackMode.PRECISE)
+        )
+        track_menu.addSeparator()
+        track_menu.addAction(self._fast_track_action)
+        track_menu.addAction(self._precise_track_action)
         new_track = track_menu.addAction("新建轨迹")
         new_track.triggered.connect(self._new_track)
         mgr = track_menu.addAction("轨迹管理器")
@@ -611,6 +636,8 @@ class MainWindow(QMainWindow):
         self._save_window_prefs()
         self._pause()
         self._stop_ai()
+        self._stop_checkpoint_download()
+        self._stop_sam_thread()
         self._stop_assistant()
         self._stop_shake()
         self._stop_pump()
@@ -621,6 +648,18 @@ class MainWindow(QMainWindow):
         if self._cal_dialog is not None:
             self._cal_dialog.hide()
         super().closeEvent(event)
+
+    def resizeEvent(self, event) -> None:  # noqa: ANN001
+        super().resizeEvent(event)
+        self._reposition_download_toast()
+
+    def moveEvent(self, event) -> None:  # noqa: ANN001
+        super().moveEvent(event)
+        self._reposition_download_toast()
+
+    def _reposition_download_toast(self) -> None:
+        if self._download_toast is not None and self._download_toast.isVisible():
+            self._download_toast.reposition()
 
     def changeEvent(self, event) -> None:  # noqa: ANN001
         super().changeEvent(event)
@@ -776,6 +815,8 @@ class MainWindow(QMainWindow):
             self._contour_action.setChecked(self._show_contours)
             self._prompt_action.setChecked(self._show_prompts)
             self._cal_overlay_action.setChecked(self._show_calibration)
+            if getattr(self._pending_project, "track_mode", None) is not None:
+                self._set_track_mode(self._pending_project.track_mode, announce=False)
             self._restore_assistant_from_project(self._pending_project)
             self._pending_project = None
         elif not self._tracks:
@@ -939,6 +980,10 @@ class MainWindow(QMainWindow):
         if self._info is None:
             return
         self._slider.set_loop_range(0, self._info.frame_count - 1)
+
+    def _on_chart_frame_activated(self, index: int) -> None:
+        self._pause()
+        self._show_frame(index)
 
     def _on_slider_pressed(self) -> None:
         self._pause()
@@ -1268,11 +1313,12 @@ class MainWindow(QMainWindow):
         start = layer.seed_frame
         if layer.prompts:
             start = layer.prompts[-1].frame
-        end = self._play_bounds()[1]
+        end = self._track_end_frame()
         layer.status = "running"
         self._refresh_track_ui()
         self._stop_shake()
-        thread, worker = run_track_in_thread(
+        thread = self._ensure_sam_thread()
+        _, worker = run_track_in_thread(
             self._info.path,
             seed,
             on_progress=self._on_ai_progress,
@@ -1282,15 +1328,19 @@ class MainWindow(QMainWindow):
             start_frame=start,
             end_frame=end,
             prompts=layer.prompts,
+            track_mode=self._track_mode,
+            thread=thread,
         )
-        self._ai_thread = thread
         self._ai_worker = worker
         self._cancel_ai_action.setEnabled(True)
         self._ai_track_action.setText("取消 SAM 跟踪")
         self._list_panel.set_running(True)
         self._sync_undo_actions()
-        self.statusBar().showMessage("SAM 2 跟踪进行中…（独立线程，不占用播放解码）")
-        thread.start()
+        kind = "快速Tiny" if self._track_mode is TrackMode.FAST else "精准Small"
+        device = self._sam_device_label()
+        self.statusBar().showMessage(
+            f"跟踪 第 {start + 1}–{end + 1} 帧 · {kind} · {device}"
+        )
 
     def _ensure_sam_runtime(self) -> bool:
         """Prompt once for Apache-2.0 weights. Never silently fall back to color blobs."""
@@ -1306,33 +1356,110 @@ class MainWindow(QMainWindow):
             return False
         from ai.model_manager import ModelNotAvailable, checkpoint_path, ensure_checkpoint
 
+        if self._download_worker is not None:
+            toast = self._ensure_download_toast()
+            toast.show()
+            toast.reposition()
+            self.statusBar().showMessage("正在下载权重，请稍候…", 4000)
+            return False
+        spec = spec_for_mode(self._track_mode)
         try:
-            ensure_checkpoint(DEFAULT_SPEC, download=False)
+            ensure_checkpoint(spec, download=False)
             return True
         except ModelNotAvailable:
-            path = checkpoint_path()
+            path = checkpoint_path(spec)
+            label = "SAM 2.1 Tiny" if spec.model_id.endswith("tiny") else "SAM 2.1 Small"
             reply = QMessageBox.question(
                 self,
-                "下载 SAM 2.1 Tiny",
+                f"下载 {label}",
                 (
-                    "首次跟踪需要下载官方权重（Apache-2.0，约 150 MB）。\n\n"
+                    f"首次使用{label}需要下载官方权重（Apache-2.0）。\n\n"
                     f"保存到：{path}\n"
-                    f"来源：{DEFAULT_SPEC.url}\n"
-                    f"Hugging Face：{DEFAULT_SPEC.hf_id}\n"
-                    f"SHA-256：{DEFAULT_SPEC.sha256}\n\n"
+                    f"来源：{spec.url}\n"
+                    f"Hugging Face：{spec.hf_id}\n"
+                    f"SHA-256：{spec.sha256}\n\n"
                     "确认下载？"
                 ),
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return False
-            self.statusBar().showMessage("正在下载并校验 SAM 2.1 Tiny 权重…")
-            try:
-                ensure_checkpoint(DEFAULT_SPEC, download=True)
-            except ModelNotAvailable as exc:
-                QMessageBox.warning(self, "权重下载失败", str(exc))
-                return False
-            self.statusBar().showMessage("权重已就绪", 4000)
-            return True
+            self._start_checkpoint_download(spec)
+            return False
+
+    def _ensure_download_toast(self) -> DownloadToast:
+        if self._download_toast is None:
+            self._download_toast = DownloadToast(self)
+            self._download_toast.cancelled.connect(self._cancel_checkpoint_download)
+        return self._download_toast
+
+    def _start_checkpoint_download(self, spec) -> None:  # noqa: ANN001
+        if self._download_worker is not None:
+            return
+        toast = self._ensure_download_toast()
+        toast.set_download(spec)
+        toast.show()
+        toast.reposition()
+        self._download_resume_track = True
+        thread, worker = run_checkpoint_download(
+            spec,
+            on_progress=toast.set_progress,
+            on_stage=toast.set_stage,
+            on_finished=self._on_checkpoint_downloaded,
+            on_failed=self._on_checkpoint_download_failed,
+            on_cancelled=self._on_checkpoint_download_cancelled,
+        )
+        self._download_thread = thread
+        self._download_worker = worker
+        thread.start()
+        label = "SAM 2.1 Tiny" if spec.model_id.endswith("tiny") else "SAM 2.1 Small"
+        self.statusBar().showMessage(f"正在下载 {label} 权重…")
+
+    def _cancel_checkpoint_download(self) -> None:
+        if self._download_worker is not None:
+            self._download_worker.cancel()
+            self.statusBar().showMessage("正在取消下载…", 3000)
+
+    def _release_download_thread(self) -> None:
+        thread = self._download_thread
+        self._download_thread = None
+        self._download_worker = None
+        if thread is not None:
+            thread.quit()
+            thread.wait(8000)
+
+    def _stop_checkpoint_download(self) -> None:
+        self._download_resume_track = False
+        if self._download_worker is not None:
+            self._download_worker.cancel()
+        self._release_download_thread()
+        if self._download_toast is not None:
+            self._download_toast.hide()
+
+    def _on_checkpoint_downloaded(self, _path: str) -> None:
+        resume = self._download_resume_track
+        self._download_resume_track = False
+        self._release_download_thread()
+        toast = self._download_toast
+        if toast is not None:
+            toast.set_finished()
+            QTimer.singleShot(1200, toast.hide)
+        self.statusBar().showMessage("权重已就绪", 4000)
+        if resume:
+            QTimer.singleShot(0, self._start_or_cancel_ai_track)
+
+    def _on_checkpoint_download_failed(self, message: str) -> None:
+        self._download_resume_track = False
+        self._release_download_thread()
+        if self._download_toast is not None:
+            self._download_toast.hide()
+        QMessageBox.warning(self, "权重下载失败", message)
+
+    def _on_checkpoint_download_cancelled(self) -> None:
+        self._download_resume_track = False
+        self._release_download_thread()
+        if self._download_toast is not None:
+            self._download_toast.hide()
+        self.statusBar().showMessage("已取消下载", 4000)
 
     def _cancel_ai_track(self, *_args) -> None:
         if self._ai_worker is not None:
@@ -1342,10 +1469,6 @@ class MainWindow(QMainWindow):
     def _stop_ai(self) -> None:
         if self._ai_worker is not None:
             self._ai_worker.cancel()
-        if self._ai_thread is not None:
-            self._ai_thread.quit()
-            self._ai_thread.wait(5000)
-        self._ai_thread = None
         self._ai_worker = None
         self._cancel_ai_action.setEnabled(False)
         self._ai_track_action.setText("SAM 自动跟踪")
@@ -1353,6 +1476,57 @@ class MainWindow(QMainWindow):
         self._sync_undo_actions()
         if getattr(self, "_assistant_panel", None) is not None:
             self._sync_assistant()
+
+    def _ensure_sam_thread(self) -> QThread:
+        if self._sam_thread is None:
+            self._sam_thread = QThread(self)
+            self._sam_thread.setObjectName("samRuntime")
+        if not self._sam_thread.isRunning():
+            self._sam_thread.start()
+        return self._sam_thread
+
+    def _stop_sam_thread(self) -> None:
+        if self._sam_thread is None:
+            return
+        self._sam_thread.quit()
+        self._sam_thread.wait(5000)
+        self._sam_thread = None
+
+    def _track_end_frame(self) -> int:
+        assert self._info is not None
+        _start, end = self._slider.loop_range()
+        last = self._info.frame_count - 1
+        if end > 0:
+            return min(end, last)
+        return last
+
+    def _sam_device_label(self) -> str:
+        try:
+            from ai.model_manager import select_device
+
+            return select_device()
+        except Exception:  # noqa: BLE001
+            return "cpu"
+
+    def _set_track_mode(self, mode: TrackMode, *, announce: bool = True) -> None:
+        self._track_mode = mode
+        if getattr(self, "_fast_track_action", None) is not None:
+            self._fast_track_action.setChecked(mode is TrackMode.FAST)
+            self._precise_track_action.setChecked(mode is TrackMode.PRECISE)
+        if not announce:
+            return
+        layer = self._active_layer()
+        interpolated = bool(
+            layer is not None
+            and layer.result is not None
+            and any(point.interpolated for point in layer.result.points)
+        )
+        if mode is TrackMode.PRECISE and interpolated:
+            self.statusBar().showMessage("已切换精准（Small）。请再按 T 重跟踪。", 5000)
+        elif mode is TrackMode.FAST:
+            self.statusBar().showMessage("已切换快速预览（Tiny，隔帧插值）。", 4000)
+        else:
+            self.statusBar().showMessage("已切换精准分析（Small，逐帧）。", 4000)
 
     def _stop_shake(self) -> None:
         if self._shake_worker is not None:
@@ -1687,18 +1861,20 @@ class MainWindow(QMainWindow):
         if dest.suffix.lower() != ".json":
             dest = dest.with_suffix(".json")
         active = self._active_layer()
+        spec = spec_for_mode(self._track_mode)
         write_track_project(
             dest,
             self._info.path,
             None if active is None else active.result,
             tracks=self._tracks,
             active_track_id=self._active_id,
-            model_name=DEFAULT_SPEC.model_id,
-            model_version=DEFAULT_SPEC.version,
-            model_license=DEFAULT_SPEC.license,
+            model_name=spec.model_id,
+            model_version=spec.version,
+            model_license=spec.license,
             show_contours=self._show_contours,
             show_prompts=self._show_prompts,
             show_calibration=self._show_calibration,
+            track_mode=self._track_mode,
             calibration=self._calibration,
             assistant=self._assistant_state,
         )
@@ -2046,6 +2222,11 @@ class MainWindow(QMainWindow):
                 self._assistant_window.resize(960, 720)
                 self._assistant_window.move(120, 80)
         self._load_assistant_prefs(settings)
+        mode = settings.value("track/mode", TrackMode.PRECISE.value)
+        try:
+            self._set_track_mode(TrackMode(str(mode)), announce=False)
+        except ValueError:
+            self._set_track_mode(TrackMode.PRECISE, announce=False)
 
     def _save_window_prefs(self) -> None:
         if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
@@ -2057,6 +2238,7 @@ class MainWindow(QMainWindow):
         settings.setValue("assistant/chat_model", self._chat_model)
         settings.setValue("assistant/report_model", self._report_model)
         settings.setValue("assistant/teaching_level", self._assistant_state.teaching_level.value)
+        settings.setValue("track/mode", self._track_mode.value)
 
     def _load_assistant_prefs(self, settings: QSettings) -> None:
         chat = settings.value("assistant/chat_model", DEFAULT_CHAT_MODEL)
@@ -2198,7 +2380,14 @@ class MainWindow(QMainWindow):
             teaching_level=self._assistant_state.teaching_level,
             pendulum_length_m=self._assistant_state.pendulum_length_m,
             stale=self._assistant_state.stale,
+            interpolated=self._active_track_interpolated(),
         )
+
+    def _active_track_interpolated(self) -> bool:
+        layer = self._active_layer()
+        if layer is None or layer.result is None:
+            return False
+        return any(point.interpolated for point in layer.result.points)
 
     def _analyze_experiment(self, *_args) -> None:
         self._set_assistant_visible(True)
