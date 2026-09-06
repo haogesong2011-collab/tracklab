@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from urllib.error import URLError
@@ -17,9 +18,14 @@ from app.update_checker import (  # noqa: E402
     GITHUB_API_LATEST,
     GITHUB_RELEASES_PAGE,
     UpdateStatus,
+    asset_sha256,
+    can_self_update,
     check_for_update,
+    dmg_filename,
     evaluate_release,
     is_newer,
+    parse_release_assets,
+    parse_sha256sums,
     parse_version,
     safe_release_url,
     should_auto_check,
@@ -35,6 +41,25 @@ def _payload(**overrides):
         "html_url": "https://github.com/haogesong2011-collab/tracklab/releases/tag/v0.2.0",
         "body": "修复更新检查",
         "published_at": "2026-09-01T12:00:00Z",
+        "assets": [
+            {
+                "name": "TrackLab-arm64.dmg",
+                "browser_download_url": (
+                    "https://github.com/haogesong2011-collab/tracklab/"
+                    "releases/download/v0.2.0/TrackLab-arm64.dmg"
+                ),
+                "size": 1000,
+                "digest": "sha256:" + ("ab" * 32),
+            },
+            {
+                "name": "SHA256SUMS.txt",
+                "browser_download_url": (
+                    "https://github.com/haogesong2011-collab/tracklab/"
+                    "releases/download/v0.2.0/SHA256SUMS.txt"
+                ),
+                "size": 80,
+            },
+        ],
     }
     data.update(overrides)
     return data
@@ -138,6 +163,58 @@ class UpdateCheckerTests(unittest.TestCase):
     def test_download_url_falls_back_to_releases_page(self) -> None:
         info = evaluate_release(_payload(html_url="http://insecure.example"), "0.1.0")
         self.assertEqual(info.download_url, GITHUB_RELEASES_PAGE)
+
+    def test_dmg_assets_and_can_self_update(self) -> None:
+        self.assertEqual(dmg_filename("arm64"), "TrackLab-arm64.dmg")
+        self.assertEqual(dmg_filename("x86_64"), "TrackLab-x86_64.dmg")
+        self.assertIsNone(dmg_filename("riscv64"))
+        info = evaluate_release(_payload(), "0.1.0")
+        self.assertEqual(info.installer_for("arm64").name, "TrackLab-arm64.dmg")
+        self.assertIsNone(info.installer_for("x86_64"))
+        self.assertEqual(asset_sha256(info.installer_for("arm64")), "ab" * 32)
+        self.assertEqual(len(parse_release_assets(_payload())), 2)
+        sums = parse_sha256sums(("aa" * 32) + "  TrackLab-arm64.dmg\n# skip\n")
+        self.assertEqual(sums["TrackLab-arm64.dmg"], "aa" * 32)
+        self.assertEqual(parse_sha256sums("not-a-hash  file.dmg"), {})
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = Path(raw) / "TrackLab.app"
+            bundle.mkdir()
+            self.assertTrue(
+                can_self_update(
+                    info,
+                    frozen=True,
+                    system="darwin",
+                    machine="arm64",
+                    bundle=bundle,
+                )
+            )
+            self.assertFalse(
+                can_self_update(
+                    info,
+                    frozen=False,
+                    system="darwin",
+                    machine="arm64",
+                    bundle=bundle,
+                )
+            )
+            self.assertFalse(
+                can_self_update(
+                    info,
+                    frozen=True,
+                    system="linux",
+                    machine="arm64",
+                    bundle=bundle,
+                )
+            )
+            self.assertFalse(
+                can_self_update(
+                    info,
+                    frozen=True,
+                    system="darwin",
+                    machine="x86_64",
+                    bundle=bundle,
+                )
+            )
 
     def test_update_checks_allowed_respects_env(self) -> None:
         old_skip = os.environ.get("TRACKLAB_SKIP_UPDATE_CHECK")

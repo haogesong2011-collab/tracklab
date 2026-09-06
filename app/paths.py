@@ -10,6 +10,17 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+def frozen_app_bundle() -> Path | None:
+    """Outer ``TrackLab.app`` directory when running from a packaged binary."""
+    if not is_frozen():
+        return None
+    exe = Path(sys.executable).resolve()
+    for parent in exe.parents:
+        if parent.name.endswith(".app"):
+            return parent
+    return None
+
+
 def resource_root() -> Path:
     """Directory that contains collected `datas` (source repo or `_MEIPASS`)."""
     meipass = getattr(sys, "_MEIPASS", None)

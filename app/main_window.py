@@ -46,17 +46,23 @@ from app.track_panels import TrackDataPanel, TrackListPanel
 from app.track_window import TrackManagerWindow
 from app.data_views import TrackChartPanel
 from app.download_toast import DownloadToast
-from app.paths import style_path
+from app.paths import frozen_app_bundle, style_path
 from app.update_checker import (
     SETTINGS_AUTO_CHECK,
     SETTINGS_LAST_CHECK,
     SETTINGS_SKIPPED,
     UpdateStatus,
+    can_self_update,
     should_auto_check,
     status_bar_message,
     update_checks_allowed,
 )
-from app.update_dialog import run_update_check_in_thread, show_update_result
+from app.update_dialog import (
+    open_release_page,
+    run_self_update_in_thread,
+    run_update_check_in_thread,
+    show_update_result,
+)
 from app.view_toolbar import ViewToolbar
 from app.widgets import (
     AXIS_MIN_LENGTH,
@@ -213,6 +219,9 @@ class MainWindow(QMainWindow):
         self._update_thread = None
         self._update_worker = None
         self._update_manual = False
+        self._self_update_thread = None
+        self._self_update_worker = None
+        self._applying_update = False
 
         self._video = VideoView()
         self._hint = DropHint()
@@ -702,6 +711,8 @@ class MainWindow(QMainWindow):
         self._stop_shake()
         self._stop_depth_audit()
         self._stop_update_check()
+        if not self._applying_update:
+            self._stop_self_update()
         self._stop_pump()
         if self._track_window is not None:
             self._track_window.hide()
@@ -760,6 +771,8 @@ class MainWindow(QMainWindow):
         choice = show_update_result(self, info, manual=manual)
         if choice == "skip" and info.latest:
             QSettings().setValue(SETTINGS_SKIPPED, info.latest)
+        if choice == "download" and can_self_update(info):
+            self._start_self_update(info)
         if manual:
             if info.status is UpdateStatus.AVAILABLE:
                 self.statusBar().clearMessage()
@@ -779,6 +792,91 @@ class MainWindow(QMainWindow):
         self._update_thread = None
         self._update_worker = None
 
+    def _start_self_update(self, info) -> None:  # noqa: ANN001
+        if self._self_update_worker is not None:
+            return
+        if self._download_worker is not None:
+            QMessageBox.information(self, "正在下载", "请等待当前下载完成后再更新。")
+            return
+        bundle = frozen_app_bundle()
+        if bundle is None:
+            open_release_page(info)
+            return
+        toast = self._ensure_download_toast()
+        name = info.installer.name if info.installer is not None else "TrackLab.dmg"
+        toast.begin(f"正在更新到 {info.latest or '新版本'}", name)
+        toast.show()
+        toast.reposition()
+        thread, worker = run_self_update_in_thread(
+            info,
+            bundle,
+            __version__,
+            on_progress=toast.set_progress,
+            on_stage=toast.set_stage,
+            on_finished=self._on_self_update_ready,
+            on_failed=self._on_self_update_failed,
+            on_cancelled=self._on_self_update_cancelled,
+        )
+        self._self_update_thread = thread
+        self._self_update_worker = worker
+        thread.start()
+        self.statusBar().showMessage("正在下载新版本…")
+
+    def _cancel_self_update(self) -> None:
+        if self._self_update_worker is not None:
+            self._self_update_worker.cancel()
+            self.statusBar().showMessage("正在取消更新…", 3000)
+
+    def _stop_self_update(self) -> None:
+        worker = self._self_update_worker
+        if worker is not None:
+            worker.cancel()
+        thread = self._self_update_thread
+        self._self_update_thread = None
+        self._self_update_worker = None
+        if thread is not None:
+            thread.quit()
+            thread.wait(2000)
+
+    def _on_self_update_ready(self, new_app) -> None:  # noqa: ANN001
+        from app.self_update import launch_replacer
+
+        toast = self._download_toast
+        if toast is not None:
+            toast.set_finished("即将重启并完成安装")
+        self._self_update_thread = None
+        self._self_update_worker = None
+        bundle = frozen_app_bundle()
+        if bundle is None:
+            self._hide_download_toast()
+            QMessageBox.warning(self, "更新", "找不到当前安装包，请到网页下载。")
+            return
+        QMessageBox.information(
+            self,
+            "更新已就绪",
+            "新版本已下载并校验。TrackLab 将退出，随后自动替换并重新打开。",
+        )
+        self._applying_update = True
+        launch_replacer(pid=os.getpid(), bundle=bundle, new_app=Path(new_app))
+        QTimer.singleShot(200, self.close)
+
+    def _on_self_update_failed(self, message: str) -> None:
+        self._self_update_thread = None
+        self._self_update_worker = None
+        self._hide_download_toast()
+        self.statusBar().clearMessage()
+        QMessageBox.warning(self, "更新失败", message + "\n\n可改从网页下载安装包。")
+
+    def _on_self_update_cancelled(self) -> None:
+        self._self_update_thread = None
+        self._self_update_worker = None
+        self._hide_download_toast()
+        self.statusBar().showMessage("已取消更新", 4000)
+
+    def _hide_download_toast(self) -> None:
+        if self._download_toast is not None:
+            self._download_toast.hide()
+
     def _show_quick_start(self) -> None:
         QMessageBox.information(
             self,
@@ -788,6 +886,7 @@ class MainWindow(QMainWindow):
             "3. 用坐标系菜单设置标定尺或运动平面。\n"
             "4. 在数据表和分图中查看结果，需要时导出 CSV / JSON。\n\n"
             "标准安装包捆绑 Tiny 权重；精准 Small 首次使用时下载。\n"
+            "安装包可在帮助菜单检查更新；点「立即更新」会下载并替换当前应用。\n"
             "AI 离面抽检需从源码安装完整依赖。",
         )
 
@@ -808,7 +907,7 @@ class MainWindow(QMainWindow):
             "关于 TrackLab",
             f"TrackLab {__version__}\n\n"
             "物理视频分析工具。快速 Tiny 随安装包提供，精准 Small 首次使用时下载。"
-            "含手工平面测量。\n"
+            "含手工平面测量。安装包可在应用内检查并安装更新。\n"
             "AI 离面抽检仍为可选能力。\n\n"
             f"项目主页：https://github.com/{GITHUB_REPO}",
         )
@@ -1571,11 +1670,17 @@ class MainWindow(QMainWindow):
     def _ensure_download_toast(self) -> DownloadToast:
         if self._download_toast is None:
             self._download_toast = DownloadToast(self)
-            self._download_toast.cancelled.connect(self._cancel_checkpoint_download)
+            self._download_toast.cancelled.connect(self._on_download_toast_cancelled)
         return self._download_toast
 
+    def _on_download_toast_cancelled(self) -> None:
+        if self._self_update_worker is not None:
+            self._cancel_self_update()
+            return
+        self._cancel_checkpoint_download()
+
     def _start_checkpoint_download(self, spec) -> None:  # noqa: ANN001
-        if self._download_worker is not None:
+        if self._download_worker is not None or self._self_update_worker is not None:
             return
         toast = self._ensure_download_toast()
         toast.set_download(spec)

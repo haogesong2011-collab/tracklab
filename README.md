@@ -79,6 +79,6 @@ TRACKLAB_SKIP_UPDATE_CHECK=1 python -m tests.ai.ci
 
 查看版本：`.venv/bin/python3 -m app --version`
 
-macOS 安装包由 `.github/workflows/release-macos.yml` 在打 `v*` tag 时构建。本地打包见 `macos-packaging/build_macos.sh`（捆绑 Tiny 权重；精准 Small 首次使用时下载）。
+macOS 安装包由 `.github/workflows/release-macos.yml` 在打 `v*` tag 时构建。本地打包见 `macos-packaging/build_macos.sh`（捆绑 Tiny 权重；精准 Small 首次使用时下载）。帮助菜单「检查更新」在安装包里可点「立即更新」，下载 DMG 并替换当前应用后重启。从源码运行时仍打开 GitHub Releases 页面。
 
 数据约定见 [datasets/README.md](datasets/README.md)。Holdout 槽位（约 20%）选型期间禁止调参。

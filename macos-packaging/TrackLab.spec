@@ -117,6 +117,7 @@ hiddenimports = [
     "app.paths",
     "app.update_checker",
     "app.update_dialog",
+    "app.self_update",
     "app.download_toast",
     "app.chart_ticks",
     "engine.decoder",

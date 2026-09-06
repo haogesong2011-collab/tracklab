@@ -10,9 +10,9 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Mapping
+from typing import Callable, Mapping, Sequence
 
 from app import GITHUB_REPO, __version__
 
@@ -42,6 +42,14 @@ class UpdateStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class ReleaseAsset:
+    name: str
+    url: str
+    size: int = 0
+    digest: str = ""
+
+
+@dataclass(frozen=True)
 class UpdateInfo:
     status: UpdateStatus
     current: str
@@ -50,10 +58,24 @@ class UpdateInfo:
     notes: str = ""
     published_at: str = ""
     message: str = ""
+    assets: tuple[ReleaseAsset, ...] = field(default_factory=tuple)
 
     @property
     def download_url(self) -> str:
         return safe_release_url(self.html_url) or GITHUB_RELEASES_PAGE
+
+    @property
+    def installer(self) -> ReleaseAsset | None:
+        return self.installer_for()
+
+    def installer_for(self, machine: str | None = None) -> ReleaseAsset | None:
+        want = dmg_filename(machine)
+        if not want:
+            return None
+        for asset in self.assets:
+            if asset.name == want:
+                return asset
+        return None
 
 
 def parse_version(tag: str) -> tuple[int, int, int] | None:
@@ -108,6 +130,119 @@ def format_published_at(value: str) -> str:
     if len(text) >= 10 and text[4] == "-" and text[7] == "-":
         return text[:10]
     return text
+
+
+def dmg_filename(machine: str | None = None) -> str | None:
+    """Installer name shipped by ``release-macos.yml`` for this CPU."""
+    kind = (machine or os.uname().machine).strip().lower()
+    if kind in {"arm64", "aarch64"}:
+        return "TrackLab-arm64.dmg"
+    if kind in {"x86_64", "amd64"}:
+        return "TrackLab-x86_64.dmg"
+    return None
+
+
+def parse_sha256sums(text: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        digest, name = parts[0], parts[-1]
+        if name.startswith("*"):
+            name = name[1:]
+        name = name.rsplit("/", 1)[-1]
+        if len(digest) != 64:
+            continue
+        if any(char not in "0123456789abcdefABCDEF" for char in digest):
+            continue
+        result[name] = digest.lower()
+    return result
+
+
+def parse_release_assets(payload: Mapping[str, object]) -> tuple[ReleaseAsset, ...]:
+    raw = payload.get("assets") or []
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return ()
+    assets: list[ReleaseAsset] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        name = str(item.get("name") or "").strip()
+        url = safe_release_url(str(item.get("browser_download_url") or "") or None)
+        if not name or not url:
+            continue
+        try:
+            size = int(item.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        assets.append(
+            ReleaseAsset(
+                name=name,
+                url=url,
+                size=max(0, size),
+                digest=str(item.get("digest") or "").strip(),
+            )
+        )
+    return tuple(assets)
+
+
+def asset_sha256(asset: ReleaseAsset, sums: Mapping[str, str] | None = None) -> str | None:
+    digest = asset.digest.strip()
+    lowered = digest.lower()
+    if lowered.startswith("sha256:"):
+        value = digest.split(":", 1)[1].strip().lower()
+        if len(value) == 64:
+            return value
+    if sums and asset.name in sums:
+        return sums[asset.name]
+    return None
+
+
+def checksums_asset(assets: Sequence[ReleaseAsset]) -> ReleaseAsset | None:
+    for asset in assets:
+        if asset.name.upper() == "SHA256SUMS.TXT":
+            return asset
+    return None
+
+
+def can_self_update(
+    info: UpdateInfo,
+    *,
+    frozen: bool | None = None,
+    system: str | None = None,
+    machine: str | None = None,
+    bundle=None,  # noqa: ANN001
+) -> bool:
+    """True when the packaged macOS app can download and replace itself."""
+    if info.status is not UpdateStatus.AVAILABLE:
+        return False
+    want = dmg_filename(machine)
+    if not want or not any(asset.name == want for asset in info.assets):
+        return False
+    if system is None:
+        system = sys.platform
+    if system != "darwin":
+        return False
+    if frozen is None:
+        from app.paths import is_frozen
+
+        frozen = is_frozen()
+    if not frozen:
+        return False
+    if bundle is None:
+        from app.paths import frozen_app_bundle
+
+        bundle = frozen_app_bundle()
+    if bundle is None:
+        return False
+    try:
+        return os.access(str(bundle.parent), os.W_OK)
+    except OSError:
+        return False
 
 
 def safe_release_url(url: str | None) -> str | None:
@@ -169,36 +304,37 @@ def evaluate_release(
     skipped: str = "",
     honor_skip: bool = True,
 ) -> UpdateInfo:
+    assets = parse_release_assets(payload)
+    common = {
+        "html_url": safe_release_url(str(payload.get("html_url") or "") or None),
+        "notes": str(payload.get("body") or "").strip(),
+        "published_at": format_published_at(str(payload.get("published_at") or "")),
+        "assets": assets,
+    }
     if payload.get("draft") or payload.get("prerelease"):
         return UpdateInfo(
             status=UpdateStatus.NO_RELEASE,
             current=current,
             message="尚未发布正式版本。",
+            **common,
         )
     tag = str(payload.get("tag_name") or "").strip()
     parsed = parse_version(tag)
-    html_url = safe_release_url(str(payload.get("html_url") or "") or None)
-    notes = str(payload.get("body") or "").strip()
-    published = format_published_at(str(payload.get("published_at") or ""))
     if parsed is None:
         return UpdateInfo(
             status=UpdateStatus.INVALID,
             current=current,
             latest=tag or None,
-            html_url=html_url,
-            notes=notes,
-            published_at=published,
             message="远端版本号无效。",
+            **common,
         )
     if not is_newer(tag, current):
         return UpdateInfo(
             status=UpdateStatus.LATEST,
             current=current,
             latest=tag,
-            html_url=html_url,
-            notes=notes,
-            published_at=published,
             message=f"当前已是最新版本 {tag}。",
+            **common,
         )
     skipped_parsed = parse_version(skipped) if skipped else None
     if honor_skip and skipped_parsed is not None and skipped_parsed == parsed:
@@ -206,19 +342,15 @@ def evaluate_release(
             status=UpdateStatus.SKIPPED,
             current=current,
             latest=tag,
-            html_url=html_url,
-            notes=notes,
-            published_at=published,
             message=f"已跳过版本 {tag}。",
+            **common,
         )
     return UpdateInfo(
         status=UpdateStatus.AVAILABLE,
         current=current,
         latest=tag,
-        html_url=html_url,
-        notes=notes,
-        published_at=published,
         message=f"发现新版本 {tag}。",
+        **common,
     )
 
 

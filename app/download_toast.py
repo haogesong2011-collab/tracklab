@@ -78,9 +78,12 @@ class DownloadToast(QFrame):
 
     def set_download(self, spec: ModelSpec) -> None:
         label = "SAM 2.1 Tiny" if spec.model_id.endswith("tiny") else "SAM 2.1 Small"
-        self._title.setText(f"正在下载 {label}")
-        self._detail.setText(spec.filename)
-        self._status.setText("连接中…")
+        self.begin(f"正在下载 {label}", spec.filename)
+
+    def begin(self, title: str, detail: str = "") -> None:
+        self._title.setText(title)
+        self._detail.setText(detail)
+        self._status.setText("准备中…")
         self._bar.setRange(0, 0)
         self._bar.setValue(0)
         self._cancel.setEnabled(True)
@@ -107,15 +110,19 @@ class DownloadToast(QFrame):
             self._status.setText("正在校验 SHA-256…")
         elif stage == "download":
             self._status.setText("正在下载…")
+        elif stage == "checksums":
+            self._status.setText("正在读取校验和…")
+        elif stage == "extract":
+            self._status.setText("正在解包安装包…")
 
-    def set_finished(self) -> None:
+    def set_finished(self, status: str = "权重已就绪") -> None:
         self._title.setText("下载完成")
         if self._bar.maximum() > 0:
             self._bar.setValue(self._bar.maximum())
         else:
             self._bar.setRange(0, 1)
             self._bar.setValue(1)
-        self._status.setText("权重已就绪")
+        self._status.setText(status)
         self._cancel.setEnabled(False)
         self.reposition()
 
