@@ -120,6 +120,7 @@ hiddenimports = [
     "app.self_update",
     "app.download_toast",
     "app.chart_ticks",
+    "app.tutorial",
     "engine.decoder",
     "engine.video_index",
     "ai.sam_runtime",

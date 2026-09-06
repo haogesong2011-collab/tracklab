@@ -51,6 +51,7 @@ class PackagingMetadataTests(unittest.TestCase):
         self.assertIn("BUNDLE_IDENTIFIER", spec)
         self.assertIn("app.download_toast", spec)
         self.assertIn("app.chart_ticks", spec)
+        self.assertIn("app.tutorial", spec)
         self.assertIn("app.update_checker", spec)
         self.assertIn("app.self_update", spec)
         self.assertIn("ai.sam_runtime", spec)

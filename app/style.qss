@@ -141,7 +141,7 @@ QMenu::item:disabled { color: #707070; }
 }
 #videoView, #videoStage { background: #1f1f1f; border: none; }
 #toolDivider { background: #4a4a4a; }
-#toolButton {
+#toolBar QToolButton {
     background: transparent;
     border: none;
     border-radius: 8px;
@@ -149,8 +149,8 @@ QMenu::item:disabled { color: #707070; }
     min-width: 29px;
     min-height: 29px;
 }
-#toolButton:hover { background: #383838; }
-#toolButton:pressed { background: #191919; }
+#toolBar QToolButton:hover { background: #383838; }
+#toolBar QToolButton:pressed { background: #191919; }
 #zoomReadout {
     color: #b8b8b8;
     background: #2e2e2e;
@@ -421,6 +421,45 @@ QSlider#timeline::handle:horizontal {
 }
 #downloadToastCancel:hover { background: #3a3a3a; color: #f0f0f0; }
 #downloadToastCancel:disabled { color: #6a6a6a; border-color: #3a3a3a; }
+
+#tutorialOverlay {
+    background: transparent;
+}
+#tutorialCard {
+    background: #2b2b2b;
+    color: #e6e6e6;
+    border: 1px solid #3e3e3e;
+    border-radius: 8px;
+}
+#tutorialTitle {
+    color: #f0f0f0;
+    font-size: 14px;
+    font-weight: 600;
+}
+#tutorialBody {
+    color: #c8c8c8;
+    font-size: 12px;
+}
+#tutorialCounter {
+    color: #8f8f8f;
+    font-size: 11px;
+}
+#tutorialSkip, #tutorialNext {
+    background: transparent;
+    color: #c8c8c8;
+    border: 1px solid #4a4a4a;
+    border-radius: 4px;
+    padding: 4px 12px;
+    min-height: 24px;
+    font-size: 12px;
+}
+#tutorialSkip:hover, #tutorialNext:hover { background: #3a3a3a; color: #f0f0f0; }
+#tutorialNext {
+    background: #2d4a66;
+    border-color: #4da3ff;
+    color: #f0f0f0;
+}
+#tutorialNext:hover { background: #35567a; color: #ffffff; }
 
 #chartScrubReadout {
     background: #2a2a2a;

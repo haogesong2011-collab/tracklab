@@ -8,7 +8,15 @@ from pathlib import Path
 from datetime import datetime
 
 from PySide6.QtCore import QByteArray, QEvent, QSettings, QThread, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QDragEnterEvent, QDropEvent, QImage, QKeySequence
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QDragEnterEvent,
+    QDropEvent,
+    QImage,
+    QKeySequence,
+    QShowEvent,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -56,6 +64,11 @@ from app.update_checker import (
     should_auto_check,
     status_bar_message,
     update_checks_allowed,
+)
+from app.tutorial import (
+    maybe_start_tutorial,
+    tutorial_auto_start_allowed,
+    tutorial_seen,
 )
 from app.update_dialog import (
     open_release_page,
@@ -222,6 +235,12 @@ class MainWindow(QMainWindow):
         self._self_update_thread = None
         self._self_update_worker = None
         self._applying_update = False
+        self._toolbar_buttons: dict[str, QToolButton] = {}
+        self._transport: QWidget | None = None
+        self._tutorial_overlay = None
+        self._tutorial_scheduled = False
+        self._defer_update_for_tutorial = False
+        self._update_startup_timer: QTimer | None = None
 
         self._video = VideoView()
         self._hint = DropHint()
@@ -358,6 +377,7 @@ class MainWindow(QMainWindow):
 
         transport = QWidget()
         transport.setObjectName("transportBar")
+        self._transport = transport
         transport.setFixedHeight(56)
         controls = QHBoxLayout(transport)
         controls.setContentsMargins(16, 6, 14, 6)
@@ -400,11 +420,11 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._restore_window_prefs()
         self._refresh_track_ui()
-        if update_checks_allowed():
-            self._update_startup_timer = QTimer(self)
-            self._update_startup_timer.setSingleShot(True)
-            self._update_startup_timer.timeout.connect(self._maybe_auto_check_updates)
-            self._update_startup_timer.start(2500)
+        self._defer_update_for_tutorial = (
+            tutorial_auto_start_allowed() and not tutorial_seen()
+        )
+        if update_checks_allowed() and not self._defer_update_for_tutorial:
+            self._start_deferred_update_check(immediate=True)
 
     def _icon_button(self, icon, tooltip: str, slot) -> QPushButton:
         button = QPushButton()
@@ -447,7 +467,7 @@ class MainWindow(QMainWindow):
                 layout.addWidget(divider)
                 layout.addSpacing(4)
             button = QToolButton()
-            button.setObjectName("toolButton")
+            button.setObjectName("tool" + name[:1].upper() + name[1:])
             button.setIcon(toolbar_icon(name))
             button.setIconSize(icon_size())
             button.setToolTip(tooltip)
@@ -459,6 +479,7 @@ class MainWindow(QMainWindow):
                 self._ruler_btn = button
             elif name == "axis":
                 self._axis_btn = button
+            self._toolbar_buttons[name] = button
             layout.addWidget(button)
             if name == "zoom":
                 layout.addWidget(self._zoom_readout)
@@ -467,7 +488,7 @@ class MainWindow(QMainWindow):
         self._video_info = VideoInfoLabel()
         layout.addWidget(self._video_info, stretch=1)
         cache_btn = QToolButton()
-        cache_btn.setObjectName("toolButton")
+        cache_btn.setObjectName("toolCache")
         cache_btn.setIcon(toolbar_icon("cache"))
         cache_btn.setIconSize(icon_size())
         cache_btn.setToolTip("清理缓存")
@@ -722,7 +743,32 @@ class MainWindow(QMainWindow):
             self._cal_dialog.hide()
         if getattr(self, "_camera_dialog", None) is not None:
             self._camera_dialog.hide()
+        if self._tutorial_overlay is not None:
+            self._tutorial_overlay.discard()
+            self._tutorial_overlay = None
         super().closeEvent(event)
+
+    def _start_deferred_update_check(self, *, immediate: bool = False) -> None:
+        if not update_checks_allowed():
+            return
+        if not immediate:
+            if not self._defer_update_for_tutorial:
+                return
+            self._defer_update_for_tutorial = False
+        if self._update_startup_timer is None:
+            self._update_startup_timer = QTimer(self)
+            self._update_startup_timer.setSingleShot(True)
+            self._update_startup_timer.timeout.connect(self._maybe_auto_check_updates)
+        self._update_startup_timer.start(2500)
+
+    def _maybe_auto_start_tutorial(self) -> None:
+        started = maybe_start_tutorial(self)
+        if not started:
+            self._start_deferred_update_check()
+
+    def _on_tutorial_finished(self) -> None:
+        self._tutorial_overlay = None
+        self._start_deferred_update_check()
 
     def _auto_check_enabled(self) -> bool:
         value = QSettings().value(SETTINGS_AUTO_CHECK, True)
@@ -878,17 +924,7 @@ class MainWindow(QMainWindow):
             self._download_toast.hide()
 
     def _show_quick_start(self) -> None:
-        QMessageBox.information(
-            self,
-            "快速开始",
-            "1. 打开或拖入视频（mp4 / mov 等）。\n"
-            "2. 新建轨迹，框选或点击目标。快速用 Tiny 隔帧，精准用 Small 逐帧。\n"
-            "3. 用坐标系菜单设置标定尺或运动平面。\n"
-            "4. 在数据表和分图中查看结果，需要时导出 CSV / JSON。\n\n"
-            "标准安装包捆绑 Tiny 权重；精准 Small 首次使用时下载。\n"
-            "安装包可在帮助菜单检查更新；点「立即更新」会下载并替换当前应用。\n"
-            "AI 离面抽检需从源码安装完整依赖。",
-        )
+        maybe_start_tutorial(self, force=True)
 
     def _show_shortcuts(self) -> None:
         QMessageBox.information(
@@ -912,17 +948,32 @@ class MainWindow(QMainWindow):
             f"项目主页：https://github.com/{GITHUB_REPO}",
         )
 
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._tutorial_scheduled:
+            return
+        self._tutorial_scheduled = True
+        if self._defer_update_for_tutorial:
+            QTimer.singleShot(400, self._maybe_auto_start_tutorial)
+
     def resizeEvent(self, event) -> None:  # noqa: ANN001
         super().resizeEvent(event)
         self._reposition_download_toast()
+        self._reposition_tutorial()
 
     def moveEvent(self, event) -> None:  # noqa: ANN001
         super().moveEvent(event)
         self._reposition_download_toast()
+        self._reposition_tutorial()
 
     def _reposition_download_toast(self) -> None:
         if self._download_toast is not None and self._download_toast.isVisible():
             self._download_toast.reposition()
+
+    def _reposition_tutorial(self) -> None:
+        overlay = self._tutorial_overlay
+        if overlay is not None and overlay.isVisible():
+            overlay.reposition()
 
     def changeEvent(self, event) -> None:  # noqa: ANN001
         super().changeEvent(event)
