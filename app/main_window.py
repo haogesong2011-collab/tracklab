@@ -1162,6 +1162,9 @@ class MainWindow(QMainWindow):
             6000,
         )
         self._show_frame(0)
+        overlay = getattr(self, "_tutorial_overlay", None)
+        if overlay is not None:
+            overlay.notify_host_action("video")
 
     def _on_open_failed(self, message: str) -> None:
         if self.sender() is not self._pump:

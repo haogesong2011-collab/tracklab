@@ -247,6 +247,18 @@ class VideoView(QWidget):
     def zoom(self) -> float:
         return self._zoom
 
+    def content_rect(self) -> QRectF | None:
+        return self._dest_rect()
+
+    def cancel_stroke(self) -> None:
+        self._press = None
+        self._press_video = None
+        self._press_button = Qt.MouseButton.NoButton
+        self._box = None
+        self._draft = None
+        self._panning = None
+        self.update()
+
     def set_zoom(self, value: float, *, anchor: QPointF | None = None) -> None:
         new_zoom = max(0.25, min(8.0, value))
         if abs(new_zoom - self._zoom) < 1e-6:
