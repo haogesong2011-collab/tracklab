@@ -1,5 +1,7 @@
 """TrackLab desktop app."""
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
+__minimum_version__ = "0.3.0"
+__update_critical__ = False
 GITHUB_REPO = "haogesong2011-collab/tracklab"
 BUNDLE_IDENTIFIER = "com.tracklab.app"

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ai.contracts import FAST_TRACK_IMAGE_SIZE, FAST_TRACK_STRIDE, TrackMode
+from ai.contracts import FAST_TRACK_STRIDE, TrackMode
 from ai.model_manager import ModelSpec, load_sam2_predictor, spec_for_mode
 
 
@@ -58,5 +58,5 @@ class SamRuntime:
 def settings_for_mode(mode: TrackMode) -> tuple[ModelSpec, int, int | None]:
     spec = spec_for_mode(mode)
     if mode is TrackMode.FAST:
-        return spec, FAST_TRACK_STRIDE, FAST_TRACK_IMAGE_SIZE
+        return spec, FAST_TRACK_STRIDE, None
     return spec, 1, None

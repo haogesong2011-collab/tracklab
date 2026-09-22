@@ -38,12 +38,41 @@ def sampled_frame_indices(
     return sorted(frames)
 
 
+def _catmull_rom_scalar(p0: float, p1: float, p2: float, p3: float, t: float) -> float:
+    t2 = t * t
+    t3 = t2 * t
+    return 0.5 * (
+        (2.0 * p1)
+        + (-p0 + p2) * t
+        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+        + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3
+    )
+
+
+def _control_points(
+    ordered: list[TrackPoint], prev_i: int, next_i: int, span: int
+) -> tuple[TrackPoint, TrackPoint] | None:
+    """Outer Catmull-Rom controls, only when visible and evenly spaced by `span`."""
+    if prev_i < 1 or next_i + 1 >= len(ordered):
+        return None
+    p0, p3 = ordered[prev_i - 1], ordered[next_i + 1]
+    if not p0.visible or not p3.visible:
+        return None
+    if ordered[prev_i].frame - p0.frame != span or p3.frame - ordered[next_i].frame != span:
+        return None
+    return p0, p3
+
+
 def densify_track_points(
     sampled: list[TrackPoint],
     start: int,
     last: int,
 ) -> list[TrackPoint]:
-    """Fill [start, last]. Interpolate only between two visible sampled points."""
+    """Fill [start, last]. Interpolate only between two visible sampled points.
+
+    Uses Catmull-Rom when the two evenly spaced neighbours outside the gap are
+    also visible; otherwise falls back to linear interpolation.
+    """
     if last < start:
         return []
     by_frame = {point.frame: point for point in sampled}
@@ -64,36 +93,45 @@ def densify_track_points(
                 )
             )
             continue
-        prev = next_pt = None
-        for point in ordered:
+        prev_i: int | None = None
+        next_i: int | None = None
+        for index, point in enumerate(ordered):
             if point.frame < frame:
-                prev = point
+                prev_i = index
             elif point.frame > frame:
-                next_pt = point
+                next_i = index
                 break
-        if (
-            prev is not None
-            and next_pt is not None
-            and prev.visible
-            and next_pt.visible
-        ):
-            xy = interpolate_xy(
-                [(prev.frame, prev.x, prev.y), (next_pt.frame, next_pt.x, next_pt.y)],
-                frame,
-            )
-            if xy is not None:
-                filled.append(
-                    TrackPoint(
-                        frame=frame,
-                        x=xy[0],
-                        y=xy[1],
-                        visible=True,
-                        confidence=min(prev.confidence, next_pt.confidence),
-                        interpolated=True,
-                    )
+        prev = None if prev_i is None else ordered[prev_i]
+        nxt = None if next_i is None else ordered[next_i]
+        xy: tuple[float, float] | None = None
+        if prev is not None and nxt is not None and prev.visible and nxt.visible:
+            span = nxt.frame - prev.frame
+            controls = _control_points(ordered, prev_i, next_i, span)
+            if span > 0 and controls is not None:
+                p0, p3 = controls
+                t = (frame - prev.frame) / span
+                xy = (
+                    _catmull_rom_scalar(p0.x, prev.x, nxt.x, p3.x, t),
+                    _catmull_rom_scalar(p0.y, prev.y, nxt.y, p3.y, t),
                 )
-                continue
-        source = prev if prev is not None else next_pt
+            else:
+                xy = interpolate_xy(
+                    [(prev.frame, prev.x, prev.y), (nxt.frame, nxt.x, nxt.y)],
+                    frame,
+                )
+        if xy is not None:
+            filled.append(
+                TrackPoint(
+                    frame=frame,
+                    x=xy[0],
+                    y=xy[1],
+                    visible=True,
+                    confidence=min(prev.confidence, nxt.confidence),
+                    interpolated=True,
+                )
+            )
+            continue
+        source = prev if prev is not None else nxt
         filled.append(
             TrackPoint(
                 frame=frame,
@@ -136,6 +174,100 @@ def shift_prompts(
     return shifted
 
 
+OFFLOAD_STATE_FRAMES = 400
+LAZY_FRAME_CACHE = 8
+
+
+def rgb_to_sam_tensor(rgb: np.ndarray, image_size: int):
+    """Resize an RGB uint8 frame to SAM 2's ImageNet-normalized CHW tensor."""
+    import torch
+
+    tensor = torch.from_numpy(np.ascontiguousarray(rgb)).permute(2, 0, 1)
+    tensor = tensor.unsqueeze(0).float()
+    tensor = torch.nn.functional.interpolate(
+        tensor,
+        size=(image_size, image_size),
+        mode="bilinear",
+        align_corners=False,
+    ).squeeze(0)
+    mean = torch.tensor(IMG_MEAN, dtype=torch.float32)[:, None, None]
+    std = torch.tensor(IMG_STD, dtype=torch.float32)[:, None, None]
+    return (tensor / 255.0 - mean) / std
+
+
+class LazyFrameTensors:
+    """SAM 2 only needs __getitem__ / __len__. Decode on demand with a small LRU."""
+
+    def __init__(
+        self,
+        info: VideoInfo,
+        indices: list[int],
+        image_size: int,
+        *,
+        compute_device: Any = "cpu",
+        offload_video_to_cpu: bool = True,
+        cache: int = LAZY_FRAME_CACHE,
+        progress: ProgressCb | None = None,
+        cancel: CancelToken | None = None,
+    ) -> None:
+        if not indices:
+            raise ValueError("empty frame range")
+        self._info = info
+        self._indices = list(indices)
+        self._image_size = int(image_size)
+        self._compute_device = compute_device
+        self._offload = bool(offload_video_to_cpu)
+        self._cache_n = max(1, int(cache))
+        self._cache: OrderedDict[int, Any] = OrderedDict()
+        self._decoder: FrameDecoder | None = None
+        self._progress = progress
+        self._cancel = cancel
+        self._decoded = 0
+        self.video_height = info.height
+        self.video_width = info.width
+
+    def __len__(self) -> int:
+        return len(self._indices)
+
+    def close(self) -> None:
+        self._cache.clear()
+        if self._decoder is not None:
+            self._decoder.close()
+            self._decoder = None
+
+    def __getitem__(self, index: int):
+        if isinstance(index, slice):
+            return [self[i] for i in range(*index.indices(len(self)))]
+        pos = int(index)
+        if pos < 0:
+            pos += len(self._indices)
+        cached = self._cache.get(pos)
+        if cached is not None:
+            self._cache.move_to_end(pos)
+            return cached
+        if self._cancel is not None and self._cancel.cancelled:
+            raise RuntimeError("frame decode cancelled")
+        if self._decoder is None:
+            self._decoder = FrameDecoder(self._info)
+        tensor = rgb_to_sam_tensor(
+            self._decoder.frame(self._indices[pos]), self._image_size
+        )
+        if not self._offload:
+            tensor = tensor.to(self._compute_device)
+        self._cache[pos] = tensor
+        if len(self._cache) > self._cache_n:
+            self._cache.popitem(last=False)
+        self._decoded += 1
+        _emit(
+            self._progress,
+            self._info.path.stem,
+            self._decoded,
+            len(self._indices),
+            "decode",
+        )
+        return tensor
+
+
 def load_frames_for_sam2(
     info: VideoInfo,
     image_size: int,
@@ -148,11 +280,7 @@ def load_frames_for_sam2(
     cancel: CancelToken | None = None,
     frame_indices: list[int] | None = None,
 ):
-    """Decode selected frames and match SAM 2's ImageNet tensor layout.
-
-    RGB is scaled to `image_size` first so 1080p is not bilinear-filtered at
-    native resolution.
-    """
+    """Eager stack of selected frames. Tests compare this to LazyFrameTensors."""
     import torch
 
     if frame_indices is None:
@@ -168,29 +296,15 @@ def load_frames_for_sam2(
         for n, i in enumerate(indices):
             if cancel and cancel.cancelled:
                 break
-            rgb = decoder.frame(i)
-            tensor = torch.from_numpy(np.ascontiguousarray(rgb)).permute(2, 0, 1)
-            tensor = tensor.unsqueeze(0).float()
-            tensor = torch.nn.functional.interpolate(
-                tensor,
-                size=(image_size, image_size),
-                mode="bilinear",
-                align_corners=False,
-            )
-            chunks.append(tensor.squeeze(0))
+            chunks.append(rgb_to_sam_tensor(decoder.frame(i), image_size))
             _emit(progress, info.path.stem, n + 1, total, "decode")
     finally:
         decoder.close()
     if not chunks:
         return None, info.height, info.width
-    images = torch.stack(chunks, dim=0) / 255.0
-    mean = torch.tensor(IMG_MEAN, dtype=torch.float32)[:, None, None]
-    std = torch.tensor(IMG_STD, dtype=torch.float32)[:, None, None]
-    images = (images - mean) / std
+    images = torch.stack(chunks, dim=0)
     if not offload_video_to_cpu:
         images = images.to(compute_device)
-        mean = mean.to(compute_device)
-        std = std.to(compute_device)
     return images, info.height, info.width
 
 
@@ -201,15 +315,18 @@ def build_video_state(
     video_width: int,
     *,
     offload_video_to_cpu: bool = True,
-    offload_state_to_cpu: bool = False,
+    offload_state_to_cpu: bool | None = None,
 ) -> dict:
     """Same inference-state dict as SAM2VideoPredictor.init_state, using our tensors."""
     import torch
 
+    n_frames = len(images)
+    if offload_state_to_cpu is None:
+        offload_state_to_cpu = n_frames >= OFFLOAD_STATE_FRAMES
     compute_device = predictor.device
     state = {
         "images": images,
-        "num_frames": len(images),
+        "num_frames": n_frames,
         "offload_video_to_cpu": offload_video_to_cpu,
         "offload_state_to_cpu": offload_state_to_cpu,
         "video_height": video_height,

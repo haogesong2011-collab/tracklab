@@ -1,24 +1,22 @@
 """Per-frame kinematics derived from TrackResult + VideoInfo PTS.
 
 Display-only: never written into project JSON or SAM TrackResult.
-Uncalibrated units are px / px/s; after a ruler they switch to m / m/s.
-Velocity is differenced in the already-transformed display frame.
+Uncalibrated units are image-projection px / px/s; after a ruler they
+switch to m / m/s. Velocity is differenced in the already-transformed
+display frame.
 
 Default analysis frame follows Tracker: +x right, +y up, so falling vy < 0.
-Even without a placed origin, image y is flipped for display so charts match
-the overlay axes.
 
-Derivatives use Tracker's step-size scheme: with step N the velocity at a
-point is the central difference (p[i+N] - p[i-N]) / (t[i+N] - t[i-N]).
-A larger N averages over a wider window and suppresses tracking jitter; for
-constant acceleration the result stays exact. Occlusions split the track into
-runs and derivatives never span a run boundary; near a boundary the step
-shrinks to whatever the run allows, degrading to a one-sided difference.
+The default velocity uses a robust local quadratic in real PTS, so 30/60/120
+fps share the same physical window. Tracker-style central differences remain
+available as a compatibility mode.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+import numpy as np
 
 from ai.calibration import CalibrationMode, CalibrationState
 from ai.contracts import LOW_CONFIDENCE, TrackPoint, TrackResult
@@ -27,6 +25,11 @@ from engine.video_index import VideoInfo
 
 DEFAULT_VELOCITY_STEP = 3
 MAX_VELOCITY_STEP = 10
+VELOCITY_MODE_LOCAL = "local"
+VELOCITY_MODE_TRACKER = "tracker"
+DEFAULT_VELOCITY_MODE = VELOCITY_MODE_LOCAL
+LOCAL_HALF_WINDOW_S = 0.10
+HUBER_C = 1.345
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,8 @@ class KinematicSample:
     quality_flags: tuple[str, ...] = ()
     off_plane_m: float | None = None
     source: str = "pixel"
+    model_vx: float | None = None
+    model_vy: float | None = None
 
     @property
     def x_px(self) -> float | None:
@@ -156,6 +161,7 @@ def series_for_result(
     *,
     calibration: CalibrationState | None = None,
     velocity_step: int = DEFAULT_VELOCITY_STEP,
+    velocity_mode: str = DEFAULT_VELOCITY_MODE,
     depth_audit: DepthAuditState | None = None,
 ) -> list[KinematicSample]:
     if result is None:
@@ -164,18 +170,23 @@ def series_for_result(
     position_unit = cal.position_unit
     speed_unit = cal.speed_unit
     step = max(1, min(int(velocity_step), MAX_VELOCITY_STEP))
+    mode = velocity_mode if velocity_mode in {VELOCITY_MODE_LOCAL, VELOCITY_MODE_TRACKER} else DEFAULT_VELOCITY_MODE
     points = sorted(result.points, key=lambda p: p.frame)
     display: list[tuple[float | None, float | None]] = [
         _display_xy(point, cal) if point.visible else (None, None) for point in points
     ]
     bounds = _run_bounds(points, display)
+    times = [time_s_for_frame(info, point.frame) for point in points]
     samples: list[KinematicSample] = []
     for i, point in enumerate(points):
-        time_s = time_s_for_frame(info, point.frame)
+        time_s = times[i]
         x, y = display[i]
         vx = vy = speed = None
         if point.visible and x is not None and y is not None and bounds[i] is not None:
-            vx, vy = _velocity_at(i, points, display, bounds[i], info, step)
+            if mode == VELOCITY_MODE_TRACKER:
+                vx, vy = _velocity_at(i, points, display, bounds[i], info, step)
+            else:
+                vx, vy = _local_velocity_at(i, times, display, bounds[i], points, step, info)
             if vx is not None and vy is not None:
                 speed = (vx * vx + vy * vy) ** 0.5
         flags: list[str] = []
@@ -332,6 +343,104 @@ def _usable(
     point = points[index]
     x, y = display[index]
     return point.visible and x is not None and y is not None
+
+
+def attach_model_velocity(
+    samples: list[KinematicSample],
+    *,
+    v0x: float,
+    v0y: float,
+    ay: float,
+    time_start_s: float,
+    time_end_s: float,
+) -> list[KinematicSample]:
+    """Overlay projectile model velocity v_x=v0x, v_y=v0y+ay*t without changing measurements."""
+    out: list[KinematicSample] = []
+    for sample in samples:
+        if sample.time_s < time_start_s - 1e-9 or sample.time_s > time_end_s + 1e-9:
+            out.append(sample)
+            continue
+        tau = sample.time_s - time_start_s
+        out.append(
+            replace(
+                sample,
+                model_vx=float(v0x),
+                model_vy=float(v0y + ay * tau),
+            )
+        )
+    return out
+
+
+def _local_velocity_at(
+    index: int,
+    times: list[float],
+    display: list[tuple[float | None, float | None]],
+    run: tuple[int, int],
+    points: list[TrackPoint],
+    step: int,
+    info: VideoInfo | None,
+) -> tuple[float | None, float | None]:
+    left, right = run
+    t0 = times[index]
+    half = LOCAL_HALF_WINDOW_S * (step / DEFAULT_VELOCITY_STEP)
+    lo = index
+    while lo > left and t0 - times[lo - 1] <= half:
+        lo -= 1
+    hi = index
+    while hi < right and times[hi + 1] - t0 <= half:
+        hi += 1
+    xs: list[float] = []
+    ys: list[float] = []
+    ts: list[float] = []
+    weights: list[float] = []
+    for j in range(lo, hi + 1):
+        x, y = display[j]
+        if x is None or y is None:
+            continue
+        xs.append(x)
+        ys.append(y)
+        ts.append(times[j])
+        weights.append(max(points[j].confidence, 1e-3))
+    if len(ts) < 2:
+        return _velocity_at(index, points, display, run, info, step)
+    degree = 2 if len(ts) >= 4 else 1
+    vx = _poly_derivative(ts, xs, weights, t0, degree)
+    vy = _poly_derivative(ts, ys, weights, t0, degree)
+    return vx, vy
+
+
+def _poly_derivative(
+    times: list[float],
+    values: list[float],
+    weights: list[float],
+    t0: float,
+    degree: int,
+) -> float | None:
+    n = len(times)
+    if n < 2:
+        return None
+    degree = max(1, min(int(degree), n - 1))
+    tau = np.asarray(times, dtype=np.float64) - t0
+    y = np.asarray(values, dtype=np.float64)
+    w = np.clip(np.asarray(weights, dtype=np.float64), 1e-6, None)
+    if float(np.max(tau) - np.min(tau)) <= 1e-12:
+        return None
+    design = np.column_stack([tau ** k for k in range(degree + 1)])
+    coef = np.zeros(degree + 1)
+    for _ in range(4):
+        sw = np.sqrt(w)
+        try:
+            coef, *_ = np.linalg.lstsq(design * sw[:, None], y * sw, rcond=None)
+        except np.linalg.LinAlgError:
+            return None
+        resid = y - design @ coef
+        mad = float(np.median(np.abs(resid - np.median(resid))))
+        scale = 1.4826 * mad + 1e-9
+        cutoff = HUBER_C * scale
+        w = np.asarray(weights, dtype=np.float64) / np.maximum(1.0, np.abs(resid) / cutoff)
+    if len(coef) < 2:
+        return 0.0
+    return float(coef[1])
 
 
 def _velocity_at(

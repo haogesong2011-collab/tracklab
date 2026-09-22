@@ -20,7 +20,7 @@ python3 -m venv .venv
 - 空格：播放 / 暂停（逐帧显示，不跳帧）
 - T：SAM 2 自动跟踪当前轨迹（独立线程）；再按一次取消
 - 新建轨迹：右侧列表可管理多条轨迹
-- 点击画面：正点选目标；Shift+点击为负点；拖动为框选
+- Control 拖动：框选目标（给 SAM 2 的提示，不是搜索范围）；Shift+Control 点击：加点
 - 跟踪完成后点击即手工修正当前帧，可再按 T 从该帧重跟踪
 - 文件 → 打开/保存项目：多轨 JSON（含提示与修正）
 - 文件 → 导出轨迹 JSON / CSV
@@ -79,6 +79,14 @@ TRACKLAB_SKIP_UPDATE_CHECK=1 python -m tests.ai.ci
 
 查看版本：`.venv/bin/python3 -m app --version`
 
-macOS 安装包由 `.github/workflows/release-macos.yml` 在打 `v*` tag 时构建。本地打包见 `macos-packaging/build_macos.sh`（捆绑 Tiny 权重；精准 Small 首次使用时下载）。帮助菜单「检查更新」在安装包里可点「立即更新」，下载 DMG 并替换当前应用后重启。从源码运行时仍打开 GitHub Releases 页面。
+macOS 安装包由 `.github/workflows/release-macos.yml` 在打 `v*` tag 时构建。本地打包见 `macos-packaging/build_macos.sh`（捆绑 Tiny 权重；精准 Small 首次使用时下载）。发版用 `macos-packaging/release.sh X.Y.Z`（工作区要干净、当前在 `main`、CHANGELOG 里已经写了这一版）。帮助菜单「检查更新」在安装包里可点「立即更新」，下载 DMG 并替换当前应用后重启。从源码运行时仍打开 GitHub Releases 页面。
+
+第一次从 Releases 下载的 DMG 安装后，macOS 可能提示「已损坏」或「无法验证开发者」。这是因为安装包是 ad-hoc 签名、没有公证。在 Finder 里对 `TrackLab.app` 右键 → 打开，或在终端执行：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/TrackLab.app
+```
+
+只有第一次安装需要这一步。之后在应用内更新时，替换脚本会自己去掉隔离标记。
 
 数据约定见 [datasets/README.md](datasets/README.md)。Holdout 槽位（约 20%）选型期间禁止调参。

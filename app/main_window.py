@@ -7,10 +7,11 @@ from pathlib import Path
 
 from datetime import datetime
 
-from PySide6.QtCore import QByteArray, QEvent, QSettings, QThread, Qt, QTimer
+from PySide6.QtCore import QByteArray, QEvent, QSettings, Qt, QThread, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
+    QDesktopServices,
     QDragEnterEvent,
     QDropEvent,
     QImage,
@@ -55,6 +56,7 @@ from app.track_window import TrackManagerWindow
 from app.data_views import TrackChartPanel
 from app.download_toast import DownloadToast
 from app.paths import frozen_app_bundle, style_path
+from app.self_update import update_log_path
 from app.update_checker import (
     SETTINGS_AUTO_CHECK,
     SETTINGS_LAST_CHECK,
@@ -144,8 +146,8 @@ from ai.desktop import (
     write_track_project,
 )
 from ai.depth_audit import DepthAuditState
-from ai.kinematics import sample_at_frame, series_for_result
-from ai.physics import source_fingerprint
+from ai.kinematics import attach_model_velocity, sample_at_frame, series_for_result
+from ai.physics import projectile_velocity_model, source_fingerprint
 from ai.model_manager import spec_for_mode
 from ai.sam2_tracker import merge_track_points
 from ai.schema import Point2D
@@ -283,6 +285,7 @@ class MainWindow(QMainWindow):
         self._chart_panel = TrackChartPanel()
         self._chart_panel.frame_activated.connect(self._on_chart_frame_activated)
         self._chart_panel.velocity_step_changed.connect(self._refresh_track_ui)
+        self._chart_panel.velocity_mode_changed.connect(self._refresh_track_ui)
         self._assistant_panel = AssistantPanel()
         self._assistant_panel.analyze_requested.connect(self._analyze_experiment)
         self._assistant_panel.confirm_requested.connect(self._confirm_experiment)
@@ -934,19 +937,47 @@ class MainWindow(QMainWindow):
             "T：开始或取消自动跟踪\n"
             "左右方向键：按底栏步长逐帧移动\n"
             "I / O：设置循环起点 / 终点\n"
-            "点击画面：正点选；Shift+点击：负点；拖动：框选",
+            "Control 拖动：框选目标；Shift+Control 点击：加点",
         )
 
     def _show_about(self) -> None:
-        QMessageBox.about(
-            self,
-            "关于 TrackLab",
+        checked = self._last_update_check_label()
+        box = QMessageBox(self)
+        box.setWindowTitle("关于 TrackLab")
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(
             f"TrackLab {__version__}\n\n"
             "物理视频分析工具。快速 Tiny 随安装包提供，精准 Small 首次使用时下载。"
             "含手工平面测量。安装包可在应用内检查并安装更新。\n"
             "AI 离面抽检仍为可选能力。\n\n"
-            f"项目主页：https://github.com/{GITHUB_REPO}",
+            f"上次检查更新：{checked}\n"
+            f"项目主页：https://github.com/{GITHUB_REPO}"
         )
+        log_button = box.addButton("打开更新日志", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Ok)
+        box.exec()
+        if box.clickedButton() is log_button:
+            self._open_update_log()
+
+    def _last_update_check_label(self) -> str:
+        try:
+            stamp = float(QSettings().value(SETTINGS_LAST_CHECK, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            stamp = 0.0
+        if stamp <= 0:
+            return "尚未检查"
+        return datetime.fromtimestamp(stamp).strftime("%Y-%m-%d %H:%M")
+
+    def _open_update_log(self) -> None:
+        path = update_log_path()
+        if not path.is_file():
+            QMessageBox.information(
+                self,
+                "更新日志",
+                "还没有更新日志。安装包里执行过更新后才会写入。",
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -1162,9 +1193,6 @@ class MainWindow(QMainWindow):
             6000,
         )
         self._show_frame(0)
-        overlay = getattr(self, "_tutorial_overlay", None)
-        if overlay is not None:
-            overlay.notify_host_action("video")
 
     def _on_open_failed(self, message: str) -> None:
         if self.sender() is not self._pump:
@@ -1893,19 +1921,44 @@ class MainWindow(QMainWindow):
             return
         self._start_shake()
 
+    def _shake_track_span(self) -> tuple[int, int | None]:
+        frames: list[int] = []
+        for layer in self._tracks:
+            if layer.result is None:
+                continue
+            frames.extend(point.frame for point in layer.result.points if point.visible)
+        if not frames:
+            return 0, None
+        return min(frames), max(frames)
+
+    def _shake_excludes(self) -> dict[int, list[tuple[float, float]]]:
+        exclude: dict[int, list[tuple[float, float]]] = {}
+        for layer in self._tracks:
+            if layer.result is None:
+                continue
+            for point in layer.result.points:
+                if not point.visible:
+                    continue
+                exclude.setdefault(point.frame, []).append((point.x, point.y))
+        return exclude
+
     def _start_shake(self) -> None:
         if self._info is None:
             return
         self._stop_shake()
+        start_frame, end_frame = self._shake_track_span()
         thread, worker = run_shake_in_thread(
             self._info.path,
             on_progress=self._on_shake_progress,
             on_finished=self._on_shake_finished,
             on_failed=self._on_shake_failed,
+            start_frame=start_frame,
+            end_frame=end_frame,
+            exclude_by_frame=self._shake_excludes(),
         )
         self._shake_thread = thread
         self._shake_worker = worker
-        self.statusBar().showMessage("正在根据四角参照点估计镜头抖动…")
+        self.statusBar().showMessage("正在根据背景锚点估计镜头运动…")
         thread.start()
 
     def _on_shake_progress(self, event: ProgressEvent) -> None:
@@ -1920,23 +1973,32 @@ class MainWindow(QMainWindow):
         if self._shake is None or not self._cal_drawn_before_shake:
             return
         self._cal_drawn_before_shake = False
-        dx, dy = self._shake.offset(0)
-        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
-            return
+        dx, dy = self._shake.to_stable(0.0, 0.0, 0)
+        origin_shift = (dx * dx + dy * dy) ** 0.5
         for ruler in self._calibration.rulers:
-            ruler.a = Point2D(ruler.a.x - dx, ruler.a.y - dy)
-            ruler.b = Point2D(ruler.b.x - dx, ruler.b.y - dy)
+            ax, ay = self._shake.to_stable(ruler.a.x, ruler.a.y, 0)
+            bx, by = self._shake.to_stable(ruler.b.x, ruler.b.y, 0)
+            ruler.a = Point2D(ax, ay)
+            ruler.b = Point2D(bx, by)
         if self._calibration.plane is not None:
             self._calibration.plane.corners = [
-                Point2D(point.x - dx, point.y - dy) for point in self._calibration.plane.corners
+                Point2D(*self._shake.to_stable(point.x, point.y, 0))
+                for point in self._calibration.plane.corners
             ]
-        if self._calibration.frame.origin_x is not None:
-            self._calibration.frame.origin_x -= dx
-        if self._calibration.frame.origin_y is not None:
-            self._calibration.frame.origin_y -= dy
+        if self._calibration.frame.origin_x is not None and self._calibration.frame.origin_y is not None:
+            ox, oy = self._shake.to_stable(
+                self._calibration.frame.origin_x, self._calibration.frame.origin_y, 0
+            )
+            self._calibration.frame.origin_x = ox
+            self._calibration.frame.origin_y = oy
         if self._calibration.mode is CalibrationMode.PLANAR:
-            shift = (dx * dx + dy * dy) ** 0.5
-            if shift >= SHAKE_INVALIDATE_PX:
+            amp = 0.0
+            if self._shake.dx:
+                amp = max(
+                    (dx * dx + dy * dy) ** 0.5
+                    for dx, dy in zip(self._shake.dx, self._shake.dy)
+                )
+            if amp >= SHAKE_INVALIDATE_PX or origin_shift >= SHAKE_INVALIDATE_PX:
                 self._calibration.camera_moved = True
             self._calibration.validate()
 
@@ -1946,14 +2008,24 @@ class MainWindow(QMainWindow):
             return
         self._shake = shake
         self._migrate_calibration_after_shake()
-        self._refresh_track_ui()
-        n_frames = len(shake.dx)
+        applied = bool(shake.recommended)
+        if not applied and self._shake_enabled:
+            self._on_shake_apply_toggled(False)
         n_anchors = len(shake.anchors_at(0)) if shake.anchors else 0
-        self.statusBar().showMessage(
-            f"背景补偿完成：已处理 {n_frames} 帧，锁定 {n_anchors} 个四角参照点。"
-            "数据表、分图和 CSV 使用补偿后坐标，画面上的轨迹仍与原视频对齐。",
-            8000,
-        )
+        detail = shake.summary()
+        if applied:
+            self.statusBar().showMessage(
+                f"背景补偿完成：{detail}。已锁定 {n_anchors} 个背景锚点。"
+                "数据表、分图和 CSV 使用补偿后坐标，画面上的轨迹仍与原视频对齐。",
+                8000,
+            )
+        else:
+            self.statusBar().showMessage(
+                f"背景补偿质量不足（{detail}），已保持关闭以免引入抖动。"
+                "安全门控会回退变差片段，无法用开关强制应用。",
+                10000,
+            )
+        self._refresh_track_ui()
 
     def _on_shake_failed(self, message: str) -> None:
         self._stop_shake()
@@ -2069,13 +2141,7 @@ class MainWindow(QMainWindow):
         self._view_bar.set_tracks(self._tracks, self._active_id)
         layer = self._active_layer()
         analyzed = self._analysis_result(layer)
-        samples = series_for_result(
-            analyzed,
-            self._info,
-            calibration=self._calibration,
-            velocity_step=self._chart_panel.velocity_step,
-            depth_audit=self._depth_audit,
-        )
+        samples = self._kinematic_samples(analyzed)
         self._data_panel.set_units(
             self._calibration.position_unit, self._calibration.speed_unit
         )
@@ -2100,13 +2166,7 @@ class MainWindow(QMainWindow):
 
     def _sync_view_bar(self) -> None:
         layer = self._active_layer()
-        samples = series_for_result(
-            self._analysis_result(layer),
-            self._info,
-            calibration=self._calibration,
-            velocity_step=self._chart_panel.velocity_step,
-            depth_audit=self._depth_audit,
-        )
+        samples = self._kinematic_samples(self._analysis_result(layer))
         sample = sample_at_frame(samples, self._index)
         self._view_bar.set_sample(sample)
         if (
@@ -2198,6 +2258,7 @@ class MainWindow(QMainWindow):
             self._info,
             calibration=self._calibration,
             velocity_step=self._chart_panel.velocity_step,
+            velocity_mode=self._chart_panel.velocity_mode,
             depth_audit=self._depth_audit,
         )
         self.statusBar().showMessage(f"已导出 CSV {dest}", 4000)
@@ -3024,15 +3085,46 @@ class MainWindow(QMainWindow):
                 confirmed and has_api_key() and not sam and not self._assistant_busy
             )
 
-    def _assistant_samples(self):
-        layer = self._active_layer()
-        return series_for_result(
-            self._analysis_result(layer),
+    def _kinematic_samples(self, result: TrackResult | None = None):
+        samples = series_for_result(
+            result,
             self._info,
             calibration=self._calibration,
             velocity_step=self._chart_panel.velocity_step,
+            velocity_mode=self._chart_panel.velocity_mode,
             depth_audit=self._depth_audit,
         )
+        fit = projectile_velocity_model(samples, calibration=self._calibration)
+        if fit is None:
+            self._chart_panel.set_model_warning("")
+            return samples
+        r2x = float(fit.parameters.get("r2x") or 0.0)
+        if r2x < 0.98:
+            self._chart_panel.set_model_warning(
+                "镜头运动、透视或跟踪误差使像素速度不满足理想斜抛"
+            )
+        else:
+            self._chart_panel.set_model_warning("")
+        if not self._calibration.active:
+            self._chart_panel.set_model_warning(
+                "未标定：图中速度为图像投影速度 px/s。"
+                + (
+                    " 镜头运动、透视或跟踪误差使像素速度不满足理想斜抛"
+                    if r2x < 0.98
+                    else ""
+                )
+            )
+        return attach_model_velocity(
+            samples,
+            v0x=float(fit.parameters.get("v0x") or 0.0),
+            v0y=float(fit.parameters.get("v0y") or 0.0),
+            ay=float(fit.parameters.get("a_y") or 0.0),
+            time_start_s=fit.time_start_s,
+            time_end_s=fit.time_end_s,
+        )
+
+    def _assistant_samples(self):
+        return self._kinematic_samples(self._analysis_result(self._active_layer()))
 
     def _teaching_context(self) -> dict:
         plane = self._calibration.plane

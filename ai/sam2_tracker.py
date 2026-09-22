@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import Any, Iterable, Protocol
 
 import numpy as np
@@ -19,10 +20,10 @@ from ai.contracts import (
 from ai.models import Tracker, _emit, load_video
 from ai.model_manager import DEFAULT_SPEC, ModelNotAvailable, ModelSpec, load_sam2_predictor
 from ai.sam2_frames import (
+    LazyFrameTensors,
     build_video_state,
     densify_track_points,
     is_sam2_predictor,
-    load_frames_for_sam2,
     remap_prompts_to_samples,
     sampled_frame_indices,
 )
@@ -31,6 +32,28 @@ from engine.video_index import VideoInfo
 
 
 OFFLOAD_VIDEO_BYTES = 512 * 1024 * 1024
+TRACK_WINDOW_SAMPLED = 300
+
+
+def sample_track_windows(
+    sampled: list[int], size: int = TRACK_WINDOW_SAMPLED
+) -> list[list[int]]:
+    """Split sampled frames into windows of `size` with one overlapping frame."""
+    if not sampled:
+        return []
+    width = max(2, int(size))
+    if len(sampled) <= width:
+        return [list(sampled)]
+    windows: list[list[int]] = []
+    start = 0
+    n = len(sampled)
+    while start < n:
+        end = min(start + width, n)
+        windows.append(list(sampled[start:end]))
+        if end >= n:
+            break
+        start = end - 1
+    return windows
 
 
 def should_offload_video(device: Any, n_frames: int, image_size: int) -> bool:
@@ -246,125 +269,53 @@ class Sam2Tracker(Tracker):
             predictor = load_sam2_predictor(self._spec, download=False)
             self._predictor = predictor
 
-        local_hints = hints
-        sampled_index = {frame: i for i, frame in enumerate(sampled)}
+        sampled_points: list[TrackPoint] = []
+        contours: dict[int, list[tuple[float, float]]] = {}
+        total = last - start + 1
+        _emit(progress, info.path.stem, 0, total, "track")
+        cancelled = False
         if is_sam2_predictor(predictor):
-            decode_size = int(image_size or predictor.image_size)
-            native_size = int(predictor.image_size)
-            offload = should_offload_video(predictor.device, len(sampled), native_size)
-            images, height, width = load_frames_for_sam2(
+            cancelled = self._track_windows(
+                predictor,
                 info,
-                decode_size,
+                sampled,
+                hints,
+                seed_xy,
+                object_id,
+                start,
+                total,
+                sampled_points,
+                contours,
+                cancel=cancel,
+                progress=progress,
+            )
+        else:
+            cancelled = self._track_whole(
+                predictor,
+                info,
+                sampled,
+                hints,
+                seed_xy,
+                object_id,
                 start,
                 last,
-                compute_device=predictor.device,
-                offload_video_to_cpu=offload,
-                progress=progress,
+                total,
+                sampled_points,
+                contours,
                 cancel=cancel,
-                frame_indices=sampled,
+                progress=progress,
             )
-            if cancel and cancel.cancelled:
-                return TrackResult(
-                    clip_id=info.path.stem,
-                    points=[],
-                    failure_reason=FailureReason.CANCELLED,
-                    model_name=self.name,
-                    model_version=self.version,
-                    elapsed_s=time.perf_counter() - t0,
-                )
-            if images is None:
-                raise ModelNotAvailable("未能解码用于 SAM 2 的视频帧")
-            if images.shape[-1] != native_size:
-                import torch.nn.functional as F
-
-                images = F.interpolate(
-                    images,
-                    size=(native_size, native_size),
-                    mode="bilinear",
-                    align_corners=False,
-                )
-            if not offload:
-                images = images.to(predictor.device)
-            state = build_video_state(
-                predictor,
-                images,
-                height,
-                width,
-                offload_video_to_cpu=offload,
-            )
-            local_hints = remap_prompts_to_samples(hints, sampled, seed_xy)
-            propagate_start = 0
-            propagate_count = len(sampled)
-        else:
-            state = predictor.init_state(str(info.path))
-            local_hints = hints
-            propagate_start = start
-            propagate_count = last - start + 1
-
-        self._apply_prompts(predictor, state, local_hints, object_id)
-        if cancel and cancel.cancelled:
+        if cancelled:
             return TrackResult(
                 clip_id=info.path.stem,
-                points=[],
+                points=sampled_points,
                 failure_reason=FailureReason.CANCELLED,
                 model_name=self.name,
                 model_version=self.version,
                 elapsed_s=time.perf_counter() - t0,
             )
 
-        sampled_points: list[TrackPoint] = []
-        contours: dict[int, list[tuple[float, float]]] = {}
-        total = last - start + 1
-        _emit(progress, info.path.stem, 0, total, "track")
-        try:
-            stream = predictor.propagate_in_video(
-                state,
-                start_frame_idx=propagate_start,
-                max_frame_num_to_track=propagate_count,
-            )
-            for payload in stream:
-                if cancel and cancel.cancelled:
-                    return TrackResult(
-                        clip_id=info.path.stem,
-                        points=sampled_points,
-                        failure_reason=FailureReason.CANCELLED,
-                        model_name=self.name,
-                        model_version=self.version,
-                        elapsed_s=time.perf_counter() - t0,
-                    )
-                frame_idx, obj_ids, masks = payload[:3]
-                if is_sam2_predictor(predictor):
-                    idx = int(frame_idx)
-                    if idx < 0 or idx >= len(sampled):
-                        continue
-                    abs_frame = sampled[idx]
-                else:
-                    abs_frame = int(frame_idx)
-                    if abs_frame not in sampled_index:
-                        continue
-                if abs_frame < start or abs_frame > last:
-                    continue
-                mask = self._pick_mask(obj_ids, masks, object_id)
-                x, y, conf, visible, contour = mask_centroid(logits_to_mask(mask))
-                if not visible:
-                    x, y = seed_xy
-                sampled_points.append(
-                    TrackPoint(
-                        frame=abs_frame,
-                        x=x,
-                        y=y,
-                        visible=visible,
-                        confidence=conf,
-                    )
-                )
-                if contour:
-                    contours[abs_frame] = contour
-                _emit(progress, info.path.stem, abs_frame - start + 1, total, "track")
-        except ModelNotAvailable:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            raise ModelNotAvailable(f"SAM 2 推理失败：{exc}") from exc
-
+        sampled_points.sort(key=lambda point: point.frame)
         points = densify_track_points(sampled_points, start, last)
         result = TrackResult(
             clip_id=info.path.stem,
@@ -376,6 +327,190 @@ class Sam2Tracker(Tracker):
         )
         result.contours = contours  # type: ignore[attr-defined]
         return result
+
+    def _record(
+        self,
+        payload: Any,
+        abs_frame: int,
+        seed_xy: tuple[float, float],
+        object_id: int,
+        out_points: list[TrackPoint],
+        out_contours: dict[int, list[tuple[float, float]]],
+    ) -> None:
+        _idx, obj_ids, masks = payload[:3]
+        mask = self._pick_mask(obj_ids, masks, object_id)
+        x, y, conf, visible, contour = mask_centroid(logits_to_mask(mask))
+        if not visible:
+            x, y = seed_xy
+        out_points.append(
+            TrackPoint(frame=abs_frame, x=x, y=y, visible=visible, confidence=conf)
+        )
+        if contour:
+            out_contours[abs_frame] = contour
+
+    @staticmethod
+    def _window_prompts(
+        hints: list[TrackPrompt],
+        window: list[int],
+        seed_xy: tuple[float, float],
+        carry: TrackPrompt | None,
+    ) -> list[TrackPrompt]:
+        if carry is None:
+            return remap_prompts_to_samples(hints, window, seed_xy)
+        index = {frame: i for i, frame in enumerate(window)}
+        local = [carry]
+        local += [replace(p, frame=index[p.frame]) for p in hints if p.frame in index]
+        return local
+
+    @staticmethod
+    def _carry_prompt(
+        contours: dict[int, list[tuple[float, float]]],
+        points: list[TrackPoint],
+        frame: int,
+    ) -> TrackPrompt | None:
+        """Seed the next window from the last mask of the previous one."""
+        contour = contours.get(frame)
+        if contour:
+            xs = [pt[0] for pt in contour]
+            ys = [pt[1] for pt in contour]
+            return TrackPrompt(
+                frame=0,
+                kind=PromptKind.BOX,
+                x=min(xs),
+                y=min(ys),
+                x2=max(xs),
+                y2=max(ys),
+            )
+        point = next(
+            (p for p in reversed(points) if p.frame == frame and p.visible), None
+        )
+        if point is None:
+            return None
+        return TrackPrompt(
+            frame=0, kind=PromptKind.POSITIVE, x=point.x, y=point.y
+        )
+
+    def _track_windows(
+        self,
+        predictor: Any,
+        info: VideoInfo,
+        sampled: list[int],
+        hints: list[TrackPrompt],
+        seed_xy: tuple[float, float],
+        object_id: int,
+        start: int,
+        total: int,
+        out_points: list[TrackPoint],
+        out_contours: dict[int, list[tuple[float, float]]],
+        *,
+        cancel: CancelToken | None,
+        progress: ProgressCb | None,
+    ) -> bool:
+        """Run SAM window by window so memory does not grow with video length."""
+        native = int(predictor.image_size)
+        seen: set[int] = set()
+        carry: TrackPrompt | None = None
+        for window in sample_track_windows(sampled, TRACK_WINDOW_SAMPLED):
+            if cancel and cancel.cancelled:
+                return True
+            offload = should_offload_video(predictor.device, len(window), native)
+            images = LazyFrameTensors(
+                info,
+                window,
+                native,
+                compute_device=predictor.device,
+                offload_video_to_cpu=offload,
+                progress=progress,
+                cancel=cancel,
+            )
+            try:
+                state = build_video_state(
+                    predictor,
+                    images,
+                    info.height,
+                    info.width,
+                    offload_video_to_cpu=offload,
+                )
+                self._apply_prompts(
+                    predictor,
+                    state,
+                    self._window_prompts(hints, window, seed_xy, carry),
+                    object_id,
+                )
+                if cancel and cancel.cancelled:
+                    return True
+                stream = predictor.propagate_in_video(
+                    state, start_frame_idx=0, max_frame_num_to_track=len(window)
+                )
+                for payload in stream:
+                    if cancel and cancel.cancelled:
+                        return True
+                    idx = int(payload[0])
+                    if idx < 0 or idx >= len(window):
+                        continue
+                    abs_frame = window[idx]
+                    if abs_frame in seen:
+                        continue
+                    seen.add(abs_frame)
+                    self._record(
+                        payload, abs_frame, seed_xy, object_id, out_points, out_contours
+                    )
+                    _emit(
+                        progress, info.path.stem, abs_frame - start + 1, total, "track"
+                    )
+            except ModelNotAvailable:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                raise ModelNotAvailable(f"SAM 2 推理失败：{exc}") from exc
+            finally:
+                images.close()
+            carry = self._carry_prompt(out_contours, out_points, window[-1])
+        return False
+
+    def _track_whole(
+        self,
+        predictor: Any,
+        info: VideoInfo,
+        sampled: list[int],
+        hints: list[TrackPrompt],
+        seed_xy: tuple[float, float],
+        object_id: int,
+        start: int,
+        last: int,
+        total: int,
+        out_points: list[TrackPoint],
+        out_contours: dict[int, list[tuple[float, float]]],
+        *,
+        cancel: CancelToken | None,
+        progress: ProgressCb | None,
+    ) -> bool:
+        """Predictors that decode the file themselves (tests) stay single-pass."""
+        state = predictor.init_state(str(info.path))
+        self._apply_prompts(predictor, state, hints, object_id)
+        if cancel and cancel.cancelled:
+            return True
+        allowed = set(sampled)
+        try:
+            stream = predictor.propagate_in_video(
+                state,
+                start_frame_idx=start,
+                max_frame_num_to_track=last - start + 1,
+            )
+            for payload in stream:
+                if cancel and cancel.cancelled:
+                    return True
+                abs_frame = int(payload[0])
+                if abs_frame not in allowed:
+                    continue
+                self._record(
+                    payload, abs_frame, seed_xy, object_id, out_points, out_contours
+                )
+                _emit(progress, info.path.stem, abs_frame - start + 1, total, "track")
+        except ModelNotAvailable:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ModelNotAvailable(f"SAM 2 推理失败：{exc}") from exc
+        return False
 
     @staticmethod
     def _pick_mask(obj_ids: Any, masks: Any, object_id: int) -> Any:

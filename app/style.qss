@@ -99,7 +99,7 @@ QMenu::item:disabled { color: #707070; }
 }
 #trackChartView { background: #232323; border: none; }
 #chartQuantityRow { background: transparent; }
-#chartQuantity {
+#chartQuantity, #chartVelocityMode {
     background: #2d2d2d;
     color: #d6d6d6;
     border: 1px solid #454545;
@@ -110,15 +110,16 @@ QMenu::item:disabled { color: #707070; }
     font-size: 11px;
     selection-background-color: #5a5a5a;
 }
-#chartQuantity:hover {
+#chartVelocityMode { max-width: 110px; }
+#chartQuantity:hover, #chartVelocityMode:hover {
     background: #363636;
     border-color: #5a5a5a;
 }
-#chartQuantity::drop-down {
+#chartQuantity::drop-down, #chartVelocityMode::drop-down {
     border: none;
     width: 16px;
 }
-#chartQuantity QAbstractItemView {
+#chartQuantity QAbstractItemView, #chartVelocityMode QAbstractItemView {
     background: #292929;
     color: #dedede;
     border: 1px solid #494949;
@@ -336,6 +337,7 @@ QSlider#timeline::handle:horizontal {
     font-weight: 600;
 }
 #panelHint { color: #8f8f8f; font-size: 11px; }
+#panelWarn { color: #f0c14b; font-size: 11px; }
 #panelCheck {
     color: #c8c8c8;
     spacing: 6px;
@@ -444,7 +446,7 @@ QSlider#timeline::handle:horizontal {
     color: #8f8f8f;
     font-size: 11px;
 }
-#tutorialSkip, #tutorialNext {
+#tutorialSkip, #tutorialBack, #tutorialNext {
     background: transparent;
     color: #c8c8c8;
     border: 1px solid #4a4a4a;
@@ -453,13 +455,18 @@ QSlider#timeline::handle:horizontal {
     min-height: 24px;
     font-size: 12px;
 }
-#tutorialSkip:hover, #tutorialNext:hover { background: #3a3a3a; color: #f0f0f0; }
+#tutorialSkip:hover, #tutorialBack:hover, #tutorialNext:hover { background: #3a3a3a; color: #f0f0f0; }
 #tutorialNext {
     background: #2d4a66;
     border-color: #4da3ff;
     color: #f0f0f0;
 }
 #tutorialNext:hover { background: #35567a; color: #ffffff; }
+#tutorialStage {
+    background: #1a1c20;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+}
 
 #chartScrubReadout {
     background: #2a2a2a;

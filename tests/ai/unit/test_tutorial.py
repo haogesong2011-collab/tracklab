@@ -27,6 +27,26 @@ from app.tutorial import (  # noqa: E402
     tutorial_auto_start_allowed,
     tutorial_seen,
 )
+from app.widgets import MODE_TRACK  # noqa: E402
+
+STEP_TITLES = [
+    "导入视频",
+    "打开视频",
+    "新建轨迹",
+    "框选目标",
+    "加提示点",
+    "按 T 跟踪",
+    "快速 / 精准",
+    "跟丢了怎么修",
+    "跟踪范围与背景补偿",
+    "标定尺",
+    "坐标系",
+    "分图",
+    "数据表",
+    "当前读数",
+    "AI 助手",
+    "播放与保存",
+]
 
 
 def _settings(tmp: str) -> QSettings:
@@ -91,12 +111,11 @@ class TutorialTests(unittest.TestCase):
             mapped = overlay.mapFromGlobal(window._hint.mapToGlobal(window._hint.rect().center()))
             self.assertTrue(hole.contains(mapped))
             self.assertEqual(overlay.current_demo(), DemoKind.DROP)
+            self.assertEqual(overlay.stage.demo_kind, DemoKind.DROP)
             overlay._demo_tick(1.0)
             self.assertGreater(overlay.demo_phase, 0.3)
             self.assertLess(overlay.demo_phase, 0.5)
-            cursor = overlay.cursor_pos
-            expanded = hole.adjusted(-120, -140, 120, 80)
-            self.assertTrue(expanded.contains(cursor), (cursor, hole))
+            self.assertGreater(overlay.stage.demo_phase, 0.3)
             window.close()
 
     def test_next_advances_then_finish_marks_seen(self) -> None:
@@ -112,7 +131,7 @@ class TutorialTests(unittest.TestCase):
             self.assertEqual(overlay.current_index, 1)
             self.assertEqual(overlay._title.text(), "打开视频")
             self.assertIs(overlay.current_target(), window._toolbar_buttons["open"])
-            self.assertEqual(overlay.current_demo(), DemoKind.CLICK)
+            self.assertEqual(overlay.current_demo(), DemoKind.OPEN)
             self.assertLess(overlay.demo_phase, 0.05)
             overlay._index = len(overlay._steps) - 1
             overlay._show_step()
@@ -183,11 +202,11 @@ class TutorialTests(unittest.TestCase):
             self.assertFalse(window._workspace.chart_visible)
             self.assertTrue(maybe_start_tutorial(window, settings=settings))
             overlay = window._tutorial_overlay
-            overlay._index = 4
+            overlay._index = overlay.step_index("分图")
             overlay._show_step()
             self.assertTrue(window._workspace.chart_visible)
             self.assertEqual(overlay._title.text(), "分图")
-            self.assertEqual(overlay.current_demo(), DemoKind.SCRUB)
+            self.assertEqual(overlay.current_demo(), DemoKind.CHART)
             self.assertLess(overlay.demo_phase, 0.05)
             window.close()
 
@@ -210,8 +229,11 @@ class TutorialTests(unittest.TestCase):
         self.assertEqual(window._toolbar_buttons["open"].objectName(), "toolOpen")
         self.assertEqual(window._toolbar_buttons["track"].objectName(), "toolTrack")
         self.assertEqual(window._toolbar_buttons["ruler"].objectName(), "toolRuler")
+        self.assertEqual(window._toolbar_buttons["axis"].objectName(), "toolAxis")
+        self.assertEqual(window._toolbar_buttons["save"].objectName(), "toolSave")
         self.assertEqual(window._toolbar_buttons["ai"].objectName(), "toolAi")
         self.assertEqual(window._transport.objectName(), "transportBar")
+        self.assertEqual(window._view_bar.objectName(), "viewToolbar")
         window.close()
 
     def test_escape_skips(self) -> None:
@@ -232,38 +254,33 @@ class TutorialTests(unittest.TestCase):
             self.assertFalse(overlay._demo_timer.isActive())
             window.close()
 
-    def test_demo_tick_click_moves_toward_hole(self) -> None:
+    def test_demo_tick_advances_stage_phase(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             settings = _settings(tmp)
             window = self._window()
             maybe_start_tutorial(window, settings=settings)
             overlay = window._tutorial_overlay
             overlay.advance()
-            self.assertEqual(overlay.current_demo(), DemoKind.CLICK)
+            self.assertEqual(overlay.current_demo(), DemoKind.OPEN)
             overlay._demo_tick(1.0)
-            hole = overlay.hole_rect
-            self.assertTrue(
-                hole.adjusted(-40, -40, 40, 40).contains(overlay.cursor_pos),
-                overlay.cursor_pos,
-            )
+            self.assertGreater(overlay.stage.demo_phase, 0.3)
+            self.assertEqual(overlay.stage.demo_kind, DemoKind.OPEN)
             window.close()
 
-    def test_notify_video_skips_open_steps(self) -> None:
+    def test_opening_video_does_not_skip_steps(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             settings = _settings(tmp)
             window = self._window()
             maybe_start_tutorial(window, settings=settings)
             overlay = window._tutorial_overlay
-            overlay.notify_host_action("click")
             self.assertEqual(overlay.current_index, 0)
-            overlay.notify_host_action("video")
-            self.assertEqual(overlay.current_index, 2)
-            self.assertEqual(overlay._title.text(), "跟踪目标")
-            overlay.notify_host_action("video")
-            self.assertEqual(overlay.current_index, 2)
+            self.assertFalse(hasattr(overlay, "notify_host_action"))
+            overlay._demo_tick(0.5)
+            self.assertEqual(overlay.current_index, 0)
+            self.assertEqual(overlay._title.text(), "导入视频")
             window.close()
 
-    def test_click_through_hole_reaches_target(self) -> None:
+    def test_click_through_hole_reaches_target_without_advancing(self) -> None:
         host = QWidget()
         host.resize(640, 400)
         btn = QPushButton("hit", host)
@@ -274,7 +291,7 @@ class TutorialTests(unittest.TestCase):
         self._app.processEvents()
         overlay = TutorialOverlay(
             host,
-            [TourStep("点这里", "请点高亮按钮。", lambda: btn)],
+            [TourStep("点这里", "请点高亮按钮。", lambda: btn), TourStep("下一步", "x", lambda: btn)],
         )
         overlay.begin()
         self._app.processEvents()
@@ -306,86 +323,142 @@ class TutorialTests(unittest.TestCase):
             Qt.MouseButton.NoButton,
         )
         self.assertEqual(clicked, [1])
-        self.assertTrue(overlay._advance_timer.isActive())
-        overlay._advance_from_action()
-        self._app.processEvents()
-        self.assertFalse(overlay.isVisible())
-        self.assertFalse(overlay._advance_timer.isActive())
+        self.assertTrue(overlay.isVisible())
+        self.assertEqual(overlay.current_index, 0)
+        self.assertFalse(hasattr(overlay, "_advance_timer"))
         overlay.discard()
         host.close()
 
-    def test_skip_stops_advance_timer(self) -> None:
+    def test_box_demo_stays_on_stage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             settings = _settings(tmp)
             window = self._window()
             maybe_start_tutorial(window, settings=settings)
             overlay = window._tutorial_overlay
-            overlay._schedule_advance()
-            self.assertTrue(overlay._advance_timer.isActive())
-            skip = overlay.findChild(QPushButton, "tutorialSkip")
-            skip.click()
-            self._app.processEvents()
-            self.assertFalse(overlay._advance_timer.isActive())
-            window.close()
-
-    def test_box_demo_draws_on_real_video(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            settings = _settings(tmp)
-            window = self._window()
-            maybe_start_tutorial(window, settings=settings)
-            overlay = window._tutorial_overlay
-            overlay._index = 2
+            overlay._index = overlay.step_index("框选目标")
             overlay._show_step()
             self._app.processEvents()
-            self.assertIs(window._stack.currentWidget(), window._video)
-            self.assertIsNotNone(window._video._image)
-            overlay._phase = 0.42
-            overlay._cursor = overlay._cursor_at(0.42)
-            overlay._drive_demo()
-            overlay._phase = 0.72
-            overlay._cursor = overlay._cursor_at(0.72)
-            overlay._drive_demo()
-            self._app.processEvents()
-            self.assertIsNotNone(window._video._box)
-            overlay._complete()
-            self._app.processEvents()
-            self.assertIs(window._stack.currentWidget(), window._hint)
+            self.assertEqual(overlay.current_demo(), DemoKind.BOX)
             self.assertIsNone(window._video._image)
+            self.assertEqual(window._video.interaction_mode(), MODE_TRACK)
+            overlay._demo_tick(1.2)
+            self.assertGreater(overlay.stage.demo_phase, 0.3)
+            self.assertIsNone(window._video._image)
+            self.assertIsNone(window._video._box)
+            self.assertIs(window._stack.currentWidget(), window._hint)
+            overlay._complete()
             window.close()
 
-    def test_line_demo_draws_ruler_draft(self) -> None:
+    def test_line_demo_does_not_draw_ruler_on_video(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             settings = _settings(tmp)
             window = self._window()
             maybe_start_tutorial(window, settings=settings)
             overlay = window._tutorial_overlay
-            overlay._index = 3
+            overlay._index = overlay.step_index("标定尺")
             overlay._show_step()
             self._app.processEvents()
-            overlay._phase = 0.42
-            overlay._cursor = overlay._cursor_at(0.42)
-            overlay._drive_demo()
-            overlay._phase = 0.72
-            overlay._cursor = overlay._cursor_at(0.72)
-            overlay._drive_demo()
-            self._app.processEvents()
-            self.assertIsNotNone(window._video._draft)
+            overlay._demo_tick(1.2)
+            self.assertEqual(overlay.current_demo(), DemoKind.RULER)
+            self.assertIsNone(window._video._draft)
+            self.assertEqual(window._video.interaction_mode(), MODE_TRACK)
             overlay.discard()
             window.close()
 
-    def test_click_demo_presses_real_button(self) -> None:
+    def test_open_demo_does_not_press_real_button(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             settings = _settings(tmp)
             window = self._window()
             maybe_start_tutorial(window, settings=settings)
             overlay = window._tutorial_overlay
             overlay.advance()
-            overlay._phase = 0.55
-            overlay._cursor = overlay._cursor_at(0.55)
-            overlay._drive_demo()
-            self.assertTrue(window._toolbar_buttons["open"].isDown())
+            overlay._demo_tick(1.6)
+            self.assertFalse(window._toolbar_buttons["open"].isDown())
             overlay.discard()
             window.close()
+
+    def test_detailed_steps_cover_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = _settings(tmp)
+            window = self._window()
+            maybe_start_tutorial(window, settings=settings)
+            overlay = window._tutorial_overlay
+            titles = [step.title for step in overlay._steps]
+            self.assertEqual(titles, STEP_TITLES)
+            box_body = overlay._steps[overlay.step_index("框选目标")].body
+            self.assertIn("Control", box_body)
+            self.assertIn("不是搜索范围", box_body)
+            self.assertNotIn("负点", box_body)
+            seed_body = overlay._steps[overlay.step_index("加提示点")].body
+            self.assertIn("Shift+Control", seed_body)
+            self.assertIn("正点", seed_body)
+            track_body = overlay._steps[overlay.step_index("按 T 跟踪")].body
+            self.assertIn("按 T", track_body)
+            mode_body = overlay._steps[overlay.step_index("快速 / 精准")].body
+            self.assertIn("Tiny", mode_body)
+            self.assertIn("Small", mode_body)
+            ruler_body = overlay._steps[overlay.step_index("标定尺")].body
+            self.assertIn("像素", ruler_body)
+            self.assertIn("透视", ruler_body)
+            self.assertGreater(len(track_body), 40)
+            back = overlay.findChild(QPushButton, "tutorialBack")
+            self.assertIsNotNone(back)
+            self.assertFalse(back.isVisible())
+            overlay.advance()
+            self._app.processEvents()
+            self.assertTrue(back.isVisible())
+            self.assertEqual(overlay._title.text(), "打开视频")
+            back.click()
+            self._app.processEvents()
+            self.assertEqual(overlay.current_index, 0)
+            self.assertEqual(overlay._title.text(), "导入视频")
+            self.assertFalse(back.isVisible())
+            overlay._index = overlay.step_index("坐标系")
+            overlay._show_step()
+            self.assertIs(overlay.current_target(), window._toolbar_buttons["axis"])
+            overlay._index = overlay.step_index("当前读数")
+            overlay._show_step()
+            self.assertIs(overlay.current_target(), window._view_bar)
+            overlay._index = overlay.step_index("播放与保存")
+            overlay._show_step()
+            self.assertIs(overlay.current_target(), window._transport)
+            nxt = overlay.findChild(QPushButton, "tutorialNext")
+            self.assertEqual(nxt.text(), "完成")
+            overlay.discard()
+            window.close()
+
+    def test_stage_repaints_every_demo_kind(self) -> None:
+        stage_host = QWidget()
+        overlay = TutorialOverlay(stage_host, [TourStep("x", "y", lambda: None, demo=DemoKind.DROP)])
+        overlay.begin()
+        kinds = [
+            DemoKind.DROP,
+            DemoKind.OPEN,
+            DemoKind.NEW_TRACK,
+            DemoKind.BOX,
+            DemoKind.SEED_POINT,
+            DemoKind.TRACK_RUN,
+            DemoKind.FAST_PRECISE,
+            DemoKind.FIX_POINT,
+            DemoKind.RANGE,
+            DemoKind.RULER,
+            DemoKind.AXIS,
+            DemoKind.CHART,
+            DemoKind.TABLE,
+            DemoKind.READOUT,
+            DemoKind.ASSISTANT,
+            DemoKind.PLAY,
+            DemoKind.SAVE,
+        ]
+        for kind in kinds:
+            overlay.stage.set_demo(kind, 0.6)
+            overlay.stage.repaint()
+            self.assertEqual(overlay.stage.demo_kind, kind)
+            image = overlay.stage.grab()
+            self.assertFalse(image.isNull())
+            self.assertGreater(image.width(), 0)
+        overlay.discard()
+        stage_host.close()
 
 
 if __name__ == "__main__":

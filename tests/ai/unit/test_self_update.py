@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -47,7 +48,11 @@ class SelfUpdateTests(unittest.TestCase):
 
     def test_replace_script_uses_ditto_and_argv(self) -> None:
         self.assertIn("/usr/bin/ditto", REPLACE_SCRIPT)
-        self.assertIn('open "$DEST"', REPLACE_SCRIPT)
+        self.assertIn('"$OPENER" "$DEST"', REPLACE_SCRIPT)
+        self.assertIn("TRACKLAB_OPEN:-open", REPLACE_SCRIPT)
+        self.assertIn("${DEST}.new", REPLACE_SCRIPT)
+        self.assertIn("updates/backup", REPLACE_SCRIPT)
+        self.assertIn("更新失败，已恢复原版本。", REPLACE_SCRIPT)
         self.assertIn("kill -0", REPLACE_SCRIPT)
         with tempfile.TemporaryDirectory() as raw:
             script = write_replace_script(Path(raw))
@@ -156,6 +161,61 @@ class SelfUpdateTests(unittest.TestCase):
                 os.environ.pop("TRACKLAB_UPDATE_DIR", None)
             else:
                 os.environ["TRACKLAB_UPDATE_DIR"] = old
+
+    def _app(self, root: Path, name: str, marker: str) -> Path:
+        app = root / name
+        contents = app / "Contents"
+        contents.mkdir(parents=True)
+        (contents / "marker").write_text(marker, encoding="utf-8")
+        return app
+
+    def _run_replace(self, home: Path, dest: Path, src: Path, *, open_code: int) -> subprocess.CompletedProcess[str]:
+        opener = home / "open-stub.sh"
+        opener.write_text("#!/bin/sh\nexit " + str(open_code) + "\n", encoding="utf-8")
+        opener.chmod(0o755)
+        alert = home / "alert.txt"
+        env = os.environ.copy()
+        env["HOME"] = str(home)
+        env["TRACKLAB_OPEN"] = str(opener)
+        env["TRACKLAB_ALERT_LOG"] = str(alert)
+        script = write_replace_script(home)
+        return subprocess.run(
+            ["/bin/bash", str(script), "99999999", str(dest), str(src)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=20,
+        )
+
+    def test_replace_script_clears_backup_after_success(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            home = root / "home"
+            home.mkdir()
+            dest = self._app(root, "TrackLab.app", "old")
+            src = self._app(root / "stage", "TrackLab.app", "new")
+            result = self._run_replace(home, dest, src, open_code=0)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual((dest / "Contents" / "marker").read_text(encoding="utf-8"), "new")
+            backup = home / "Library" / "Caches" / "tracklab" / "updates" / "backup"
+            self.assertEqual(list(backup.glob("TrackLab-*.app")), [])
+            log = (home / "Library" / "Logs" / "TrackLab-update.log").read_text(encoding="utf-8")
+            self.assertIn("replaced", log)
+
+    def test_replace_script_restores_backup_when_open_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            home = root / "home"
+            home.mkdir()
+            dest = self._app(root, "TrackLab.app", "old")
+            src = self._app(root / "stage", "TrackLab.app", "new")
+            result = self._run_replace(home, dest, src, open_code=1)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual((dest / "Contents" / "marker").read_text(encoding="utf-8"), "old")
+            alert = (home / "alert.txt").read_text(encoding="utf-8")
+            self.assertIn("已恢复原版本", alert)
+            self.assertFalse((root / "TrackLab.app.new").exists())
 
 
 if __name__ == "__main__":

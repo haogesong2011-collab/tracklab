@@ -18,7 +18,6 @@ class TrackMode(str, Enum):
 
 
 FAST_TRACK_STRIDE = 3
-FAST_TRACK_IMAGE_SIZE = 512
 
 
 class FailureReason(str, Enum):

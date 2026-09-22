@@ -31,7 +31,7 @@ from ai.contracts import (
     TrackResult,
 )
 from ai.depth_audit import DepthAuditState, audit_track, try_load_moge
-from ai.kinematics import DEFAULT_VELOCITY_STEP, quality_label, series_for_result
+from ai.kinematics import DEFAULT_VELOCITY_MODE, DEFAULT_VELOCITY_STEP, quality_label, series_for_result
 from ai.model_manager import DownloadCancelled, ModelNotAvailable, ModelSpec, ensure_checkpoint
 from ai.models import ColorBlobTracker, load_video
 from ai.schema import Point2D
@@ -169,15 +169,26 @@ class TrackWorker(QObject):
 
 
 class ShakeWorker(QObject):
-    """Four-corner shake estimate. Dedicated thread, never FramePump."""
+    """Conservative background-motion estimate. Dedicated thread, never FramePump."""
 
     progress = Signal(object)
     finished = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, video_path: Path, parent=None) -> None:  # noqa: ANN001
+    def __init__(
+        self,
+        video_path: Path,
+        parent=None,  # noqa: ANN001
+        *,
+        start_frame: int = 0,
+        end_frame: int | None = None,
+        exclude_by_frame: dict[int, list[tuple[float, float]]] | None = None,
+    ) -> None:
         super().__init__(parent)
         self._path = Path(video_path)
+        self._start_frame = start_frame
+        self._end_frame = end_frame
+        self._exclude_by_frame = exclude_by_frame or {}
         self._token = CancelToken()
 
     def cancel(self) -> None:
@@ -190,7 +201,14 @@ class ShakeWorker(QObject):
             def on_progress(event: ProgressEvent) -> None:
                 self.progress.emit(event)
 
-            result = estimate_shake(info, cancel=self._token, progress=on_progress)
+            result = estimate_shake(
+                info,
+                cancel=self._token,
+                progress=on_progress,
+                start_frame=self._start_frame,
+                end_frame=self._end_frame,
+                exclude_by_frame=self._exclude_by_frame,
+            )
             self.finished.emit(result)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
@@ -287,10 +305,18 @@ def run_shake_in_thread(
     on_progress: ProgressHandler | None = None,
     on_finished: Callable[[ShakeCompensation], None] | None = None,
     on_failed: Callable[[str], None] | None = None,
+    start_frame: int = 0,
+    end_frame: int | None = None,
+    exclude_by_frame: dict[int, list[tuple[float, float]]] | None = None,
 ) -> tuple[QThread, ShakeWorker]:
-    """Spawn a dedicated QThread for corner-anchor shake compensation."""
+    """Spawn a dedicated QThread for conservative background compensation."""
     thread = QThread()
-    worker = ShakeWorker(video_path)
+    worker = ShakeWorker(
+        video_path,
+        start_frame=start_frame,
+        end_frame=end_frame,
+        exclude_by_frame=exclude_by_frame,
+    )
     worker.moveToThread(thread)
     thread.started.connect(worker.run)
     if on_progress:
@@ -602,6 +628,7 @@ def export_track_csv(
     *,
     calibration: CalibrationState | None = None,
     velocity_step: int | None = None,
+    velocity_mode: str | None = None,
     depth_audit: DepthAuditState | None = None,
 ) -> None:
     samples = series_for_result(
@@ -609,6 +636,7 @@ def export_track_csv(
         info,
         calibration=calibration,
         velocity_step=DEFAULT_VELOCITY_STEP if velocity_step is None else velocity_step,
+        velocity_mode=DEFAULT_VELOCITY_MODE if velocity_mode is None else velocity_mode,
         depth_audit=depth_audit,
     )
     unit = samples[0].position_unit if samples else ("m" if calibration and calibration.active else "px")
