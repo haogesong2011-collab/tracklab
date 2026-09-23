@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QContextMenuEvent,
@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.gestures import gesture_from_native, gesture_from_wheel, pointer_pans
 from app.icons import icon_size, next_icon, prev_icon
 from ai.contracts import LOW_CONFIDENCE, PromptKind, TrackPrompt
 from engine.video_index import VideoInfo
@@ -301,13 +302,35 @@ class VideoView(QWidget):
         if self._image is None or self._image.isNull():
             super().wheelEvent(event)
             return
-        steps = event.angleDelta().y() / 120.0
-        if steps == 0:
-            super().wheelEvent(event)
+        gesture = gesture_from_wheel(event)
+        if gesture.kind == "pan":
+            self._pan += QPointF(gesture.dx, gesture.dy)
+            self.update()
+            event.accept()
             return
-        factor = 1.12 ** steps
-        self.set_zoom(self._zoom * factor, anchor=event.position())
-        event.accept()
+        if gesture.kind == "zoom":
+            factor = gesture.factor if gesture.factor is not None else 1.12 ** gesture.steps
+            self.set_zoom(self._zoom * factor, anchor=event.position())
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+    def event(self, event: QEvent) -> bool:
+        gesture = gesture_from_native(event)
+        if gesture is not None and self._image is not None and not self._image.isNull():
+            if gesture.kind == "pan":
+                self._pan += QPointF(gesture.dx, gesture.dy)
+                self.update()
+                return True
+            if gesture.kind == "zoom":
+                factor = gesture.factor if gesture.factor is not None else 1.12 ** gesture.steps
+                anchor = event.position() if hasattr(event, "position") else None
+                self.set_zoom(self._zoom * factor, anchor=anchor)
+                return True
+            if gesture.kind == "reset":
+                self.reset_zoom()
+                return True
+        return super().event(event)
 
     def set_track_index(self, index: int) -> None:
         self._track_index = index
@@ -519,11 +542,15 @@ class VideoView(QWidget):
             self.setCursor(Qt.CursorShape.OpenHandCursor)
 
     def mousePressEvent(self, event) -> None:  # noqa: ANN001
-        if event.button() == Qt.MouseButton.MiddleButton or (
+        plain_video_pan = self._mode == MODE_TRACK and pointer_pans(
+            event.button(), event.modifiers(), surface="video"
+        )
+        if plain_video_pan or event.button() == Qt.MouseButton.MiddleButton or (
             event.button() == Qt.MouseButton.LeftButton
             and event.modifiers() & Qt.KeyboardModifier.AltModifier
         ):
             self._panning = event.position()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
             return
         if self._mode == MODE_RULER:
             if event.button() != Qt.MouseButton.LeftButton:
@@ -659,6 +686,8 @@ class VideoView(QWidget):
     def mouseReleaseEvent(self, event) -> None:  # noqa: ANN001
         if self._panning is not None:
             self._panning = None
+            if self._mode == MODE_TRACK:
+                self.unsetCursor()
             return
         if self._mode == MODE_RULER:
             if self._press_video is None or event.button() != self._press_button:
