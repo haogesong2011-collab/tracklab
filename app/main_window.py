@@ -421,7 +421,7 @@ class MainWindow(QMainWindow):
             ("track", "轨迹", self._toggle_track_window),
             ("ai", "AI 助手", self._show_assistant_panel),
             ("view", "显示选项", self._toggle_overlays),
-            ("zoom", "滚轮缩放，点击还原", self._reset_zoom),
+            ("zoom", "拖动平移，滚轮或捏合缩放，点击还原", self._reset_zoom),
         ]
         self._zoom_readout = QLabel("100%")
         self._zoom_readout.setObjectName("zoomReadout")
@@ -780,7 +780,9 @@ class MainWindow(QMainWindow):
             "T：开始或取消自动跟踪\n"
             "左右方向键：按底栏步长逐帧移动\n"
             "I / O：设置循环起点 / 终点\n"
-            "点击画面：正点选；Shift+点击：负点；拖动：框选",
+            "Control+拖动：框选；Control+点击：正点；Shift+Control+点击：负点\n"
+            "左键拖动画面：平移；双指拖动平移，捏合或滚轮缩放\n"
+            "函数图：单击跳到该帧；右键或双指拖动平移",
         )
 
     def _show_about(self) -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QScatterSeries, QValueAxis
-from PySide6.QtCore import QMargins, QPointF, Qt, Signal
+from PySide6.QtCore import QEvent, QMargins, QObject, QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QComboBox,
@@ -26,6 +26,7 @@ from ai.kinematics import (
     fit_quantity,
     is_low_confidence,
 )
+from app.gestures import gesture_from_native, gesture_from_wheel, pointer_pans, shift_view_center
 
 WARN = QColor("#f0c14b")
 
@@ -74,6 +75,7 @@ class TrackChartView(QChartView):
         self._fit_degree = 0
         self._fit_series: QLineSeries | None = None
         self._fit_result: QuantityFit | None = None
+        self._panning: QPointF | None = None
 
         chart = QChart()
         panel = QColor("#232323")
@@ -88,6 +90,7 @@ class TrackChartView(QChartView):
         if layout is not None:
             layout.setContentsMargins(4, 4, 4, 4)
         self.setChart(chart)
+        self.viewport().installEventFilter(self)
 
         self._axis_time = QValueAxis()
         self._axis_value = QValueAxis()
@@ -207,14 +210,115 @@ class TrackChartView(QChartView):
         )
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: ANN001
-        if event.button() != Qt.MouseButton.LeftButton or not self._samples:
-            super().mousePressEvent(event)
+        if self._handle_pointer_press(event):
             return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: ANN001
+        if self._handle_pointer_move(event):
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: ANN001
+        if self._handle_pointer_release(event):
+            return
+        super().mouseReleaseEvent(event)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: ANN001
+        if watched is self.viewport():
+            if event.type() == QEvent.Type.NativeGesture and self._apply_native_gesture(event):
+                return True
+            if isinstance(event, QMouseEvent):
+                et = event.type()
+                if et == QEvent.Type.MouseButtonPress and self._handle_pointer_press(event):
+                    return True
+                if et == QEvent.Type.MouseMove and self._handle_pointer_move(event):
+                    return True
+                if et == QEvent.Type.MouseButtonRelease and self._handle_pointer_release(event):
+                    return True
+        return super().eventFilter(watched, event)
+
+    def event(self, event: QEvent) -> bool:
+        if self._apply_native_gesture(event):
+            return True
+        return super().event(event)
+
+    def _handle_pointer_press(self, event: QMouseEvent) -> bool:
+        if not self._samples:
+            return False
+        if pointer_pans(event.button(), event.modifiers(), surface="chart"):
+            self._panning = event.position()
+            self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+            return True
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
         series = self._series[0] if self._series else self._cursor
         value = self.chart().mapToValue(event.position(), series)
         nearest = min(self._samples, key=lambda s: abs(s.time_s - value.x()))
         self.frame_activated.emit(nearest.frame)
-        super().mousePressEvent(event)
+        return True
+
+    def _handle_pointer_move(self, event: QMouseEvent) -> bool:
+        if self._panning is None:
+            return False
+        if not (
+            event.buttons()
+            & (Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton | Qt.MouseButton.MiddleButton)
+        ):
+            self._stop_pan()
+            return False
+        delta = event.position() - self._panning
+        self._panning = event.position()
+        self.pan_by_pixels(delta.x(), delta.y())
+        return True
+
+    def _handle_pointer_release(self, event: QMouseEvent) -> bool:
+        if self._panning is None:
+            return False
+        if event.button() not in (
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.RightButton,
+            Qt.MouseButton.MiddleButton,
+        ):
+            return False
+        self._stop_pan()
+        return True
+
+    def _stop_pan(self) -> None:
+        self._panning = None
+        self.viewport().unsetCursor()
+
+    def pan_by_pixels(self, dx: float, dy: float) -> None:
+        chart = self.chart()
+        plot = chart.plotArea() if chart is not None else None
+        width = 0.0 if plot is None else plot.width()
+        height = 0.0 if plot is None else plot.height()
+        t0, t1 = self._axis_time.min(), self._axis_time.max()
+        v0, v1 = self._axis_value.min(), self._axis_value.max()
+        center_t, center_v = self._view_center()
+        self._center_t, self._center_v = shift_view_center(
+            center_t, center_v, dx, dy, width, height, t0, t1, v0, v1
+        )
+        self._apply_view()
+
+    def _apply_native_gesture(self, event: QEvent) -> bool:
+        gesture = gesture_from_native(event)
+        if gesture is None or not self._samples:
+            return False
+        if gesture.kind == "pan":
+            self.pan_by_pixels(gesture.dx, gesture.dy)
+            return True
+        if gesture.kind == "zoom":
+            series = self._series[0] if self._series else self._cursor
+            pos = event.position() if hasattr(event, "position") else QPointF(self.width() / 2, self.height() / 2)
+            value = self.chart().mapToValue(pos, series)
+            factor = gesture.factor if gesture.factor is not None else 1.15 ** gesture.steps
+            self.zoom_at(factor, value.x(), value.y())
+            return True
+        if gesture.kind == "reset":
+            self.reset_zoom()
+            return True
+        return False
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: ANN001
         if event.button() == Qt.MouseButton.LeftButton:
@@ -239,13 +343,18 @@ class TrackChartView(QChartView):
         if not self._samples:
             super().wheelEvent(event)
             return
-        steps = event.angleDelta().y() / 120.0
-        if steps == 0:
+        gesture = gesture_from_wheel(event)
+        if gesture.kind == "pan":
+            self.pan_by_pixels(gesture.dx, gesture.dy)
+            event.accept()
+            return
+        if gesture.kind != "zoom":
             super().wheelEvent(event)
             return
         series = self._series[0] if self._series else self._cursor
         value = self.chart().mapToValue(event.position(), series)
-        self.zoom_at(1.15 ** steps, value.x(), value.y())
+        factor = gesture.factor if gesture.factor is not None else 1.15 ** gesture.steps
+        self.zoom_at(factor, value.x(), value.y())
         event.accept()
 
     def zoom_in(self) -> None:
@@ -375,7 +484,7 @@ class TrackChartPanel(QWidget):
         header = QHBoxLayout()
         header.setContentsMargins(6, 2, 6, 0)
         header.setSpacing(8)
-        hint = QLabel("滚轮缩放，双击复位")
+        hint = QLabel("单击跳到该帧，双指或右键拖动平移，滚轮或捏合缩放，双击复位")
         hint.setObjectName("panelHint")
         step_label = QLabel("步长")
         step_label.setObjectName("panelHint")
