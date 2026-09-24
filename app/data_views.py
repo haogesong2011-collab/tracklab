@@ -18,8 +18,11 @@ from PySide6.QtWidgets import (
 )
 
 from ai.kinematics import (
+    DEFAULT_VELOCITY_MODE,
     DEFAULT_VELOCITY_STEP,
     MAX_VELOCITY_STEP,
+    VELOCITY_MODE_LOCAL,
+    VELOCITY_MODE_TRACKER,
     KinematicSample,
     QuantityFit,
     contiguous_segments,
@@ -60,12 +63,19 @@ VX_NAME = "vₓ"
 VY_NAME = "vᵧ"
 
 
+def speed_axis_label(speed_unit: str) -> str:
+    if speed_unit == "px/s":
+        return "图像投影速度 px/s"
+    return speed_unit
+
+
 def chart_series(position_unit: str = "px", speed_unit: str = "px/s") -> dict[str, tuple[str, str, str, str]]:
+    speed = speed_axis_label(speed_unit)
     return {
         "x": ("x", "x", "#6cb6ff", f"x ({position_unit})"),
         "y": ("y", "y", "#7dce82", f"y ({position_unit})"),
-        "vx": ("vx", VX_NAME, "#e07a5f", f"{VX_NAME} ({speed_unit})"),
-        "vy": ("vy", VY_NAME, "#d4a373", f"{VY_NAME} ({speed_unit})"),
+        "vx": ("vx", VX_NAME, "#e07a5f", f"{VX_NAME} ({speed})"),
+        "vy": ("vy", VY_NAME, "#d4a373", f"{VY_NAME} ({speed})"),
     }
 
 
@@ -247,6 +257,7 @@ class TrackChartView(QChartView):
                 warn.attachAxis(self._axis_time)
                 warn.attachAxis(self._axis_value)
                 self._series.append(warn)
+            self._apply_model(chart, samples, attr, color)
             self._apply_fit(chart, samples, attr, color)
 
         self._fit_axes(samples)
@@ -481,12 +492,18 @@ class TrackChartView(QChartView):
 
     def _fit_axes(self, samples: list[KinematicSample]) -> None:
         times = [s.time_s for s in samples]
-        vals = [
-            float(getattr(sample, attr))
-            for sample in samples
-            for attr, _name, _color in self._specs
-            if getattr(sample, attr) is not None
-        ]
+        vals: list[float] = []
+        for sample in samples:
+            for attr, _name, _color in self._specs:
+                value = getattr(sample, attr)
+                if value is not None:
+                    vals.append(float(value))
+                model_attr = {"vx": "model_vx", "vy": "model_vy"}.get(attr)
+                if model_attr is None:
+                    continue
+                model_value = getattr(sample, model_attr)
+                if model_value is not None:
+                    vals.append(float(model_value))
         t0, t1 = min(times), max(times)
         if t1 <= t0:
             t1 = t0 + 1.0
@@ -501,6 +518,30 @@ class TrackChartView(QChartView):
         else:
             self._fitted_v = (-1.0, 1.0)
         self._apply_view()
+
+    def _apply_model(
+        self, chart: QChart, samples: list[KinematicSample], attr: str, color: str
+    ) -> None:
+        model_attr = {"vx": "model_vx", "vy": "model_vy"}.get(attr)
+        if model_attr is None:
+            return
+        first = True
+        for segment in contiguous_segments(samples, model_attr):
+            series = QLineSeries()
+            series.setName("斜抛模型" if first else "")
+            pen = QPen(QColor(color).lighter(150))
+            pen.setWidth(1.5)
+            pen.setStyle(Qt.PenStyle.DotLine)
+            series.setPen(pen)
+            for sample in segment:
+                series.append(sample.time_s, float(getattr(sample, model_attr)))
+            chart.addSeries(series)
+            series.attachAxis(self._axis_time)
+            series.attachAxis(self._axis_value)
+            self._series.append(series)
+            for marker in chart.legend().markers(series):
+                marker.setVisible(False)
+            first = False
 
     def _apply_fit(
         self, chart: QChart, samples: list[KinematicSample], attr: str, color: str
@@ -536,6 +577,7 @@ class TrackChartView(QChartView):
 class TrackChartPanel(QWidget):
     frame_activated = Signal(int)
     velocity_step_changed = Signal(int)
+    velocity_mode_changed = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -552,16 +594,33 @@ class TrackChartPanel(QWidget):
         header.setSpacing(8)
         hint = QLabel("按住拖动调进度，滚轮缩放，双击复位")
         hint.setObjectName("panelHint")
-        step_label = QLabel("步长")
+        mode_label = QLabel("速度")
+        mode_label.setObjectName("panelHint")
+        self._mode = QComboBox()
+        self._mode.setObjectName("chartVelocityMode")
+        self._mode.addItem("稳健拟合", VELOCITY_MODE_LOCAL)
+        self._mode.addItem("Tracker 差分", VELOCITY_MODE_TRACKER)
+        self._mode.setCurrentIndex(0 if DEFAULT_VELOCITY_MODE == VELOCITY_MODE_LOCAL else 1)
+        self._mode.setToolTip(
+            "稳健拟合：以当前时刻为中心，用真实 PTS 做局部二次多项式并解析求导。"
+            "Tracker 差分：v(i)=(p[i+N]−p[i−N])/(t[i+N]−t[i−N])。"
+        )
+        self._mode.currentIndexChanged.connect(self._emit_velocity_mode)
+        step_label = QLabel("窗口")
         step_label.setObjectName("panelHint")
         self._step = QSpinBox()
         self._step.setObjectName("chartStep")
         self._step.setRange(1, MAX_VELOCITY_STEP)
         self._step.setValue(DEFAULT_VELOCITY_STEP)
         self._step.setToolTip(
-            "Tracker 速度步长 N：v(i)=(p[i+N]−p[i−N])/(t[i+N]−t[i−N])。增大可压跟踪抖动。"
+            "稳健拟合的时间半窗约为 0.10s × (N/3)，30/60/120 fps 对应同一物理时间。"
+            "Tracker 差分模式则是 ±N 帧。"
         )
         self._step.valueChanged.connect(self.velocity_step_changed.emit)
+        self._model_hint = QLabel("")
+        self._model_hint.setObjectName("panelWarn")
+        self._model_hint.setWordWrap(True)
+        self._model_hint.hide()
         fit_label = QLabel("拟合")
         fit_label.setObjectName("panelHint")
         self._fit = QComboBox()
@@ -577,6 +636,8 @@ class TrackChartPanel(QWidget):
         reset.clicked.connect(self.reset_zoom)
         header.addWidget(hint)
         header.addStretch()
+        header.addWidget(mode_label)
+        header.addWidget(self._mode)
         header.addWidget(step_label)
         header.addWidget(self._step)
         header.addWidget(fit_label)
@@ -587,6 +648,7 @@ class TrackChartPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
         layout.addLayout(header)
+        layout.addWidget(self._model_hint)
 
         series = chart_series()
         for default in ("x", "y"):
@@ -652,6 +714,17 @@ class TrackChartPanel(QWidget):
     @property
     def velocity_step(self) -> int:
         return int(self._step.value())
+
+    @property
+    def velocity_mode(self) -> str:
+        return str(self._mode.currentData() or DEFAULT_VELOCITY_MODE)
+
+    def _emit_velocity_mode(self) -> None:
+        self.velocity_mode_changed.emit(self.velocity_mode)
+
+    def set_model_warning(self, text: str) -> None:
+        self._model_hint.setText(text)
+        self._model_hint.setVisible(bool(text))
 
     def set_units(self, position_unit: str, speed_unit: str) -> None:
         if position_unit == self._position_unit and speed_unit == self._speed_unit:

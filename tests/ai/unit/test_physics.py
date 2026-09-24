@@ -327,6 +327,90 @@ class PhysicsEngineTests(unittest.TestCase):
         self.assertIsNone(pendulum.fit.parameters.get("g"))
         self.assertIn("pendulum_length", analysis.missing)
 
+    def test_projectile_model_velocity_is_constant_x_linear_y(self) -> None:
+        from ai.kinematics import attach_model_velocity, series_for_result
+        from ai.physics import projectile_velocity_model
+
+        fps = 50.0
+        n = 21
+        vx, v0y, ay, ppm = 12.0, 4.0, -9.81, 100.0
+        points = []
+        for i in range(n):
+            t = i / fps
+            y_disp = v0y * t + 0.5 * ay * t * t
+            points.append(
+                TrackPoint(
+                    frame=i,
+                    x=0.2 * ppm + vx * t * ppm,
+                    y=-y_disp * ppm,
+                    confidence=0.95,
+                )
+            )
+        info = _info(_uniform_pts(n, fps))
+        cal = _cal(ppm)
+        samples = series_for_result(_track(points, "proj"), info, calibration=cal)
+        fit = projectile_velocity_model(samples, calibration=cal)
+        self.assertIsNotNone(fit)
+        assert fit is not None
+        self.assertGreater(fit.parameters.get("r2x") or 0.0, 0.999)
+        attached = attach_model_velocity(
+            samples,
+            v0x=float(fit.parameters["v0x"] or 0.0),
+            v0y=float(fit.parameters["v0y"] or 0.0),
+            ay=float(fit.parameters["a_y"] or 0.0),
+            time_start_s=fit.time_start_s,
+            time_end_s=fit.time_end_s,
+        )
+        model_vx = [s.model_vx for s in attached if s.model_vx is not None]
+        self.assertTrue(model_vx)
+        self.assertLess(max(model_vx) - min(model_vx), 1e-6)
+        self.assertAlmostEqual(model_vx[0], vx, places=2)
+        interior = [s for s in attached if s.model_vy is not None][2:-2]
+        slope, _ = np.polyfit([s.time_s for s in interior], [s.model_vy for s in interior], 1)
+        self.assertAlmostEqual(slope, ay, places=2)
+
+    def test_projectile_low_r2x_warns_instead_of_fake_line(self) -> None:
+        fps = 30.0
+        n = 24
+        vx, vy, g_px = 80.0, 20.0, 981.0
+        points = []
+        for i in range(n):
+            t = i / fps
+            points.append(
+                TrackPoint(
+                    frame=i,
+                    x=20 + vx * t + 18.0 * math.sin(2 * math.pi * t / 0.4),
+                    y=20 + vy * t + 0.5 * g_px * t * t,
+                    confidence=0.93,
+                )
+            )
+        analysis = analyze_experiment(
+            _track(points, "proj-badx"),
+            _info(_uniform_pts(n, fps)),
+            _cal(100.0),
+            clip_id="proj-badx",
+        )
+        from ai.kinematics import series_for_result
+        from ai.physics import projectile_velocity_model
+
+        samples = series_for_result(
+            _track(points, "proj-badx"),
+            _info(_uniform_pts(n, fps)),
+            calibration=_cal(100.0),
+        )
+        fit = projectile_velocity_model(samples, calibration=_cal(100.0))
+        if fit is None:
+            self.assertTrue(
+                analysis.selected is None
+                or analysis.selected.experiment_type != ExperimentType.PROJECTILE
+                or any("斜抛" in w for item in analysis.candidates for w in item.warnings)
+                or any("斜抛" in w for w in analysis.warnings)
+            )
+            return
+        self.assertLess(fit.parameters.get("r2x") or 1.0, 0.98)
+        if analysis.selected is not None and analysis.selected.experiment_type is ExperimentType.PROJECTILE:
+            self.assertTrue(any("斜抛" in w for w in analysis.selected.warnings))
+
 
 if __name__ == "__main__":
     unittest.main()

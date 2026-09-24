@@ -21,8 +21,8 @@ from PySide6.QtWidgets import (
 )
 
 from ai.contracts import TrackLayer, TrackResult
-from ai.kinematics import is_low_confidence, series_for_result
-from app.data_views import VX_NAME, VY_NAME
+from ai.kinematics import is_low_confidence, quality_tooltip, series_for_result
+from app.data_views import VX_NAME, VY_NAME, speed_axis_label
 from engine.video_index import VideoInfo
 
 
@@ -68,7 +68,8 @@ class TrackListPanel(QWidget):
         self._shake_box.setObjectName("panelCheck")
         self._shake_box.setChecked(True)
         self._shake_box.setToolTip(
-            "开启后，数据表、分图和导出使用补偿后的坐标；画面上的轨迹仍与原视频对齐。"
+            "开启后，数据表、分图和导出使用补偿后的坐标。"
+            "若补偿会打乱现有数据则自动回退到原始测量，无法用开关绕过安全门控。"
         )
         self._shake_box.toggled.connect(self.shake_toggled.emit)
 
@@ -210,8 +211,8 @@ class TrackDataPanel(QWidget):
             "时间 (s)",
             f"x ({unit})",
             f"y ({unit})",
-            f"{VX_NAME} ({speed})",
-            f"{VY_NAME} ({speed})",
+            f"{VX_NAME} ({speed_axis_label(speed)})",
+            f"{VY_NAME} ({speed_axis_label(speed)})",
             "可见",
             "置信度",
         ]
@@ -263,7 +264,11 @@ class TrackDataPanel(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, sample.frame)
                 if low:
                     item.setForeground(warn)
-                    item.setToolTip(f"低可信度：{sample.confidence:.2f}")
+                    tip = quality_tooltip(sample)
+                    if "已拒收" in tip:
+                        item.setToolTip(tip)
+                    else:
+                        item.setToolTip(f"低可信度：{sample.confidence:.2f}")
                 self._table.setItem(row, col, item)
         self._table.resizeColumnsToContents()
         for col in range(self._table.columnCount()):

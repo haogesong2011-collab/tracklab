@@ -329,8 +329,12 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertEqual(window._chart_panel._charts[0]._axis_value.titleText(), "x (px)")
         self.assertEqual(window._chart_panel._charts[0]._axis_time.titleText(), "t (s)")
         self.assertEqual(window._data_panel._table.horizontalHeaderItem(2).text(), "x (px)")
+        self.assertEqual(window._chart_panel.velocity_mode, "local")
         window._chart_panel._selects[1].setCurrentIndex(2)
-        self.assertEqual(window._chart_panel._charts[1]._axis_value.titleText(), "vₓ (px/s)")
+        self.assertEqual(
+            window._chart_panel._charts[1]._axis_value.titleText(),
+            "vₓ (图像投影速度 px/s)",
+        )
         v_names = {
             series.name()
             for series in window._chart_panel._charts[1].chart().series()
@@ -667,6 +671,44 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertEqual(window._track_mode, TrackMode.FAST)
         window.close()
 
+    def test_anti_interference_menu_and_rejected_row(self) -> None:
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QApplication
+
+        from ai.track_guard import REJECT_BACKGROUND
+        from app.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        _ = app
+        window = MainWindow()
+        self.assertTrue(window._anti_interference)
+        self.assertTrue(window._anti_interference_action.isChecked())
+        window._anti_interference_action.setChecked(False)
+        self.assertFalse(window._anti_interference)
+        window._set_anti_interference(True)
+        self.assertTrue(window._anti_interference)
+        window._new_track()
+        layer = window._tracks[0]
+        layer.result = TrackResult(
+            clip_id="c",
+            points=[
+                TrackPoint(
+                    frame=0, x=8, y=8, visible=False, confidence=0.2, note=REJECT_BACKGROUND
+                ),
+                TrackPoint(frame=1, x=12, y=8, visible=True, confidence=0.95),
+            ],
+        )
+        window._refresh_track_ui()
+        warn = QColor("#f0c14b")
+        self.assertEqual(
+            window._data_panel._table.item(0, 2).foreground().color().name(), warn.name()
+        )
+        self.assertIn("已拒收：疑似跳到背景", window._data_panel._table.item(0, 2).toolTip())
+        self.assertNotEqual(
+            window._data_panel._table.item(1, 2).foreground().color().name(), warn.name()
+        )
+        window.close()
+
     def test_low_confidence_yellow_and_calibration_units(self) -> None:
         from PySide6.QtCharts import QScatterSeries
         from PySide6.QtGui import QColor
@@ -824,6 +866,39 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertIn("m/s", window._chart_panel._selects[0].itemText(2))
         self.assertEqual(window._chart_panel.velocity_step, 3)
         self.assertEqual(window._chart_panel._fit.itemText(1), "线性")
+        window.close()
+
+    def test_projectile_model_dashed_line_on_velocity_chart(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+
+        from app.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        _ = app
+        window = MainWindow()
+        window._new_track()
+        window._tracks[0].result = TrackResult(
+            clip_id="c",
+            points=[
+                TrackPoint(frame=i, x=10.0 + 3.0 * i, y=20.0 + 8.0 * i - 0.4 * i * i)
+                for i in range(12)
+            ],
+        )
+        window._refresh_track_ui()
+        window._chart_panel._selects[1].setCurrentIndex(2)
+        names = {
+            series.name()
+            for series in window._chart_panel._charts[1].chart().series()
+            if series.name()
+        }
+        self.assertIn("vₓ", names)
+        model = next(
+            series
+            for series in window._chart_panel._charts[1].chart().series()
+            if series.name() == "斜抛模型"
+        )
+        self.assertEqual(model.pen().style(), Qt.PenStyle.DotLine)
         window.close()
 
     def test_docks_float_and_redock_right_only(self) -> None:

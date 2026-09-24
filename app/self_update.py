@@ -36,14 +36,41 @@ class SelfUpdateCancelled(SelfUpdateError):
 
 
 REPLACE_SCRIPT = r"""#!/bin/bash
-set -euo pipefail
+set -u
 PID="$1"
 DEST="$2"
 SRC="$3"
 LOG="${HOME}/Library/Logs/TrackLab-update.log"
-mkdir -p "$(dirname "$LOG")"
+BACKUP_DIR="${HOME}/Library/Caches/tracklab/updates/backup"
+DITTO="${TRACKLAB_DITTO:-/usr/bin/ditto}"
+OPENER="${TRACKLAB_OPEN:-open}"
+mkdir -p "$(dirname "$LOG")" "$BACKUP_DIR"
 exec >>"$LOG" 2>&1
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) wait pid=$PID dest=$DEST"
+
+alert() {
+  local message="$1"
+  if [[ -n "${TRACKLAB_ALERT_LOG:-}" ]]; then
+    printf '%s\n' "$message" >>"$TRACKLAB_ALERT_LOG"
+    return 0
+  fi
+  /usr/bin/osascript -e "display alert \"TrackLab 更新失败\" message \"$message\"" || true
+}
+
+fail() {
+  local why="$1"
+  echo "failed: $why"
+  if [[ -n "${BACKUP:-}" && -d "$BACKUP" ]]; then
+    rm -rf "$DEST"
+    if ! mv "$BACKUP" "$DEST"; then
+      echo "rollback failed"
+    fi
+  fi
+  rm -rf "${DEST}.new"
+  alert "更新失败，已恢复原版本。"
+  exit 1
+}
+
 for _ in $(seq 1 120); do
   if ! kill -0 "$PID" 2>/dev/null; then
     break
@@ -53,16 +80,41 @@ done
 sleep 0.4
 if [[ ! -d "$SRC" ]]; then
   echo "missing new app $SRC"
+  alert "更新失败，已恢复原版本。"
   exit 1
 fi
 chmod -R u+w "$DEST" 2>/dev/null || true
-rm -rf "$DEST"
-/usr/bin/ditto "$SRC" "$DEST"
+rm -rf "${DEST}.new"
+if ! "$DITTO" "$SRC" "${DEST}.new"; then
+  rm -rf "${DEST}.new"
+  fail "copy"
+fi
+BACKUP=""
+if [[ -d "$DEST" ]]; then
+  BACKUP="$BACKUP_DIR/TrackLab-$(date -u +%Y%m%dT%H%M%SZ).app"
+  if ! mv "$DEST" "$BACKUP"; then
+    rm -rf "${DEST}.new"
+    BACKUP=""
+    fail "backup"
+  fi
+fi
+if ! mv "${DEST}.new" "$DEST"; then
+  fail "install"
+fi
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
-open "$DEST"
+if ! "$OPENER" "$DEST"; then
+  fail "open"
+fi
+if [[ -n "$BACKUP" ]]; then
+  rm -rf "$BACKUP"
+fi
 rm -rf "$(dirname "$SRC")"
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) replaced"
 """
+
+
+def update_log_path() -> Path:
+    return Path.home() / "Library" / "Logs" / "TrackLab-update.log"
 
 
 def cache_dir() -> Path:

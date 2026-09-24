@@ -90,6 +90,44 @@ DROP_HINTS = (
     "QtWebChannel",
     "QtWebSockets",
     "QtSvg",
+    "QtShaderTools",
+    "QtGraphs",
+    "QtDataVisualization",
+    "QtSpatialAudio",
+    "QtRemoteObjects",
+    "QtStateMachine",
+    "QtHttpServer",
+    "QtTest",
+    "QtHelp",
+    "QtUiTools",
+    "qmlls",
+    "qmlformat",
+    "qmlimportscanner",
+    "Assistant.app",
+    "Assistant__dot__app",
+    "Designer.app",
+    "Designer__dot__app",
+    "Linguist.app",
+    "Linguist__dot__app",
+)
+# Qt ships its own ffmpeg next to PyAV's. Their names differ only by soname
+# version, so never filter libav* / libsw* by name: PyAV decodes every video.
+
+# Only trees with no runtime importer. `torch/distributed` looks droppable but
+# `torch.utils.data.dataloader` imports it; `onnx` and `testing` are imported by
+# `torch/__init__.py` itself.
+DROP_DATA_PREFIXES = (
+    "torch/include",
+    "torch/bin",
+    "torch/utils/benchmark",
+)
+
+# Qt's own ffmpeg is orphaned once WebEngine and Multimedia are gone. Match on
+# the source path: PyAV ships dylibs with the same names and must survive.
+QT_FFMPEG_SOURCES = (
+    "PySide6/Qt/lib/libav",
+    "PySide6/Qt/lib/libsw",
+    "PySide6/Qt/lib/libpostproc",
 )
 
 datas = [(str(ROOT / "app" / "style.qss"), "app")]
@@ -120,6 +158,7 @@ hiddenimports = [
     "app.self_update",
     "app.download_toast",
     "app.chart_ticks",
+    "app.tutorial",
     "engine.decoder",
     "engine.video_index",
     "ai.sam_runtime",
@@ -127,6 +166,7 @@ hiddenimports = [
     "ai.charuco",
     "ai.depth_audit",
     "ai.autotracker",
+    "ai.track_guard",
 ]
 hiddenimports += collect_submodules("app")
 hiddenimports += collect_submodules("engine")
@@ -136,6 +176,25 @@ hiddenimports += collect_submodules("ai")
 def _keep(item) -> bool:  # noqa: ANN001
     name = item[0] if isinstance(item, (tuple, list)) else str(item)
     return not any(hint in str(name) for hint in DROP_HINTS)
+
+
+def _keep_data(item) -> bool:  # noqa: ANN001
+    """Drop torch's header/tool trees; `_keep` already handles unused Qt."""
+    if not _keep(item):
+        return False
+    dest = str(item[0] if isinstance(item, (tuple, list)) else item).replace("\\", "/")
+    return not any(
+        dest == prefix or dest.startswith(prefix + "/") for prefix in DROP_DATA_PREFIXES
+    )
+
+
+def _keep_binary(item) -> bool:  # noqa: ANN001
+    if not _keep(item):
+        return False
+    if not isinstance(item, (tuple, list)) or len(item) < 2 or not item[1]:
+        return True
+    src = str(item[1]).replace("\\", "/")
+    return not any(hint in src for hint in QT_FFMPEG_SOURCES)
 
 
 for pkg in (
@@ -181,6 +240,11 @@ a = Analysis(
     excludes=EXCLUDES,
     noarchive=False,
 )
+
+# Analysis pulls dylibs in by scanning binary dependencies, so the collect_all
+# filtering above is not enough: WebEngine alone adds 218 MB that way.
+a.binaries = [entry for entry in a.binaries if _keep_binary(entry)]
+a.datas = [entry for entry in a.datas if _keep_data(entry)]
 
 pyz = PYZ(a.pure)
 

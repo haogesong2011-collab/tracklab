@@ -38,6 +38,7 @@ def main() -> int:
     env = os.environ.copy()
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
     env.setdefault("TRACKLAB_SKIP_UPDATE_CHECK", "1")
+    env.setdefault("TRACKLAB_SKIP_TUTORIAL", "1")
     for cmd in cmds:
         print("+", " ".join(cmd), flush=True)
         completed = subprocess.run(cmd, cwd=ROOT, env=env)

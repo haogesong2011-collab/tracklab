@@ -59,6 +59,8 @@ class UpdateInfo:
     published_at: str = ""
     message: str = ""
     assets: tuple[ReleaseAsset, ...] = field(default_factory=tuple)
+    minimum_version: str = ""
+    critical: bool = False
 
     @property
     def download_url(self) -> str:
@@ -209,6 +211,42 @@ def checksums_asset(assets: Sequence[ReleaseAsset]) -> ReleaseAsset | None:
     return None
 
 
+def update_json_asset(assets: Sequence[ReleaseAsset]) -> ReleaseAsset | None:
+    for asset in assets:
+        if asset.name == "update.json":
+            return asset
+    return None
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes"}
+
+
+def parse_update_manifest(payload: object) -> tuple[str, bool]:
+    """Return ``(minimum_version, critical)``. Invalid input yields ``("", False)``."""
+    if not isinstance(payload, Mapping):
+        return "", False
+    minimum = str(payload.get("minimum_version") or "").strip()
+    if parse_version(minimum) is None:
+        minimum = ""
+    return minimum, _as_bool(payload.get("critical"))
+
+
+def update_is_required(current: str, minimum_version: str, critical: bool) -> bool:
+    """A newer release must be installed when it is critical or below the floor."""
+    if critical:
+        return True
+    floor = parse_version(minimum_version)
+    installed = parse_version(current)
+    if floor is None or installed is None:
+        return False
+    return installed < floor
+
+
 def can_self_update(
     info: UpdateInfo,
     *,
@@ -303,13 +341,19 @@ def evaluate_release(
     *,
     skipped: str = "",
     honor_skip: bool = True,
+    minimum_version: str = "",
+    critical: bool = False,
 ) -> UpdateInfo:
     assets = parse_release_assets(payload)
+    minimum = minimum_version if parse_version(minimum_version) else ""
+    required = update_is_required(current, minimum, critical)
     common = {
         "html_url": safe_release_url(str(payload.get("html_url") or "") or None),
         "notes": str(payload.get("body") or "").strip(),
         "published_at": format_published_at(str(payload.get("published_at") or "")),
         "assets": assets,
+        "minimum_version": minimum,
+        "critical": bool(critical),
     }
     if payload.get("draft") or payload.get("prerelease"):
         return UpdateInfo(
@@ -337,7 +381,12 @@ def evaluate_release(
             **common,
         )
     skipped_parsed = parse_version(skipped) if skipped else None
-    if honor_skip and skipped_parsed is not None and skipped_parsed == parsed:
+    if (
+        honor_skip
+        and not required
+        and skipped_parsed is not None
+        and skipped_parsed == parsed
+    ):
         return UpdateInfo(
             status=UpdateStatus.SKIPPED,
             current=current,
@@ -349,9 +398,31 @@ def evaluate_release(
         status=UpdateStatus.AVAILABLE,
         current=current,
         latest=tag,
-        message=f"发现新版本 {tag}。",
+        message=f"必须更新到 {tag}。" if required else f"发现新版本 {tag}。",
         **common,
     )
+
+
+def _manifest_from_assets(
+    assets: Sequence[ReleaseAsset],
+    fetch: Transport,
+    headers: dict[str, str],
+    timeout_s: float,
+) -> tuple[str, bool]:
+    asset = update_json_asset(assets)
+    if asset is None:
+        return "", False
+    try:
+        status, _response_headers, body = fetch(asset.url, headers, timeout_s)
+    except Exception:
+        return "", False
+    if status != 200:
+        return "", False
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return "", False
+    return parse_update_manifest(payload)
 
 
 def check_for_update(
@@ -422,7 +493,16 @@ def check_for_update(
             current=current,
             message="远端版本信息无法解析。",
         )
-    return evaluate_release(payload, current, skipped=skipped, honor_skip=honor_skip)
+    assets = parse_release_assets(payload)
+    minimum, critical = _manifest_from_assets(assets, fetch, headers, timeout_s)
+    return evaluate_release(
+        payload,
+        current,
+        skipped=skipped,
+        honor_skip=honor_skip,
+        minimum_version=minimum,
+        critical=critical,
+    )
 
 
 def status_bar_message(info: UpdateInfo) -> str:

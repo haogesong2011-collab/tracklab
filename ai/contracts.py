@@ -18,7 +18,6 @@ class TrackMode(str, Enum):
 
 
 FAST_TRACK_STRIDE = 3
-FAST_TRACK_IMAGE_SIZE = 512
 
 
 class FailureReason(str, Enum):
@@ -42,6 +41,7 @@ class TrackPoint:
     confidence: float = 1.0
     manual: bool = False
     interpolated: bool = False
+    note: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TrackPoint":
@@ -53,6 +53,7 @@ class TrackPoint:
             confidence=float(data.get("confidence", 1.0)),
             manual=bool(data.get("manual", False)),
             interpolated=bool(data.get("interpolated", False)),
+            note=str(data.get("note", "") or ""),
         )
 
 

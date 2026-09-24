@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import Any, Iterable, Protocol
 
 import numpy as np
@@ -19,18 +20,60 @@ from ai.contracts import (
 from ai.models import Tracker, _emit, load_video
 from ai.model_manager import DEFAULT_SPEC, ModelNotAvailable, ModelSpec, load_sam2_predictor
 from ai.sam2_frames import (
+    LazyFrameTensors,
     build_video_state,
     densify_track_points,
     is_sam2_predictor,
-    load_frames_for_sam2,
     remap_prompts_to_samples,
     sampled_frame_indices,
+)
+from ai.track_guard import (
+    RECOVERED_CONFIDENCE,
+    REJECT_BACKGROUND,
+    REJECT_STREAK,
+    ConstantVelocityKalman,
+    Foreground,
+    GateDecision,
+    MaskStats,
+    PredictedBox,
+    SamScores,
+    drop_memory_frame,
+    extract_sam_scores,
+    fill_short_gaps,
+    mask_stats,
+    motion_foreground,
+    recover_from_foreground,
+    reprompt_candidate,
+    score_mask,
+    time_s as guard_time_s,
 )
 from engine.decoder import FrameDecoder
 from engine.video_index import VideoInfo
 
 
 OFFLOAD_VIDEO_BYTES = 512 * 1024 * 1024
+TRACK_WINDOW_SAMPLED = 300
+
+
+def sample_track_windows(
+    sampled: list[int], size: int = TRACK_WINDOW_SAMPLED
+) -> list[list[int]]:
+    """Split sampled frames into windows of `size` with one overlapping frame."""
+    if not sampled:
+        return []
+    width = max(2, int(size))
+    if len(sampled) <= width:
+        return [list(sampled)]
+    windows: list[list[int]] = []
+    start = 0
+    n = len(sampled)
+    while start < n:
+        end = min(start + width, n)
+        windows.append(list(sampled[start:end]))
+        if end >= n:
+            break
+        start = end - 1
+    return windows
 
 
 def should_offload_video(device: Any, n_frames: int, image_size: int) -> bool:
@@ -70,22 +113,14 @@ def logits_to_mask(logits: Any) -> np.ndarray:
 
 def mask_centroid(
     mask: np.ndarray,
+    confidence: float | None = None,
 ) -> tuple[float, float, float, bool, list[tuple[float, float]]]:
     """Return (x, y, confidence, visible, contour) from a boolean mask."""
-    binary = as_numpy(mask).astype(bool)
-    if binary.ndim != 2:
-        binary = binary.reshape(binary.shape[-2], binary.shape[-1])
-    ys, xs = np.nonzero(binary)
-    if xs.size == 0:
+    stats = mask_stats(mask)
+    if stats is None:
         return 0.0, 0.0, 0.0, False, []
-    x = float(xs.mean())
-    y = float(ys.mean())
-    area = float(xs.size)
-    conf = float(min(1.0, area / 64.0))
-    x0, x1 = float(xs.min()), float(xs.max())
-    y0, y1 = float(ys.min()), float(ys.max())
-    contour = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
-    return x, y, conf, True, contour
+    conf = float(confidence) if confidence is not None else float(min(1.0, stats.area / 64.0))
+    return stats.x, stats.y, conf, True, stats.contour
 
 
 def merge_track_points(
@@ -188,6 +223,118 @@ class FakeVideoPredictor:
         return logits[None, ...]
 
 
+class _GuardSession:
+    """Per-track Kalman + frame-difference state. Closed after track() returns."""
+
+    def __init__(self, info: VideoInfo, enabled: bool) -> None:
+        self.info = info
+        self.enabled = bool(enabled)
+        self.kalman = ConstantVelocityKalman()
+        self.decoder: FrameDecoder | None = None
+        self.prev_rgb: np.ndarray | None = None
+        self.streak = 0
+        self.last_bad: tuple[float, float] | None = None
+        self.dropped: list[int] = []
+        self.reprompted: set[int] = set()
+
+    def close(self) -> None:
+        if self.decoder is not None:
+            self.decoder.close()
+            self.decoder = None
+
+    def observe(
+        self,
+        abs_frame: int,
+        binary: np.ndarray,
+        scores: SamScores,
+    ) -> tuple[GateDecision, MaskStats | None, PredictedBox | None, Foreground | None]:
+        stats = mask_stats(binary)
+        if not self.enabled:
+            if stats is None:
+                return GateDecision(False, 0.0, ""), None, None, None
+            conf = float(min(1.0, stats.area / 64.0))
+            self.kalman.update(
+                guard_time_s(self.info, abs_frame),
+                stats.x,
+                stats.y,
+                stats.w,
+                stats.h,
+                area=stats.area,
+            )
+            return GateDecision(True, conf, ""), stats, None, None
+        t = guard_time_s(self.info, abs_frame)
+        pred = self.kalman.predict(t)
+        fg = self._foreground(abs_frame)
+        if stats is None and self.kalman.updates >= 2:
+            found = recover_from_foreground(fg, pred, self.kalman.median_area())
+            if found is not None:
+                self.kalman.update(t, found.x, found.y, found.w, found.h, area=found.area)
+                self.streak = 0
+                self.last_bad = None
+                return GateDecision(True, RECOVERED_CONFIDENCE, ""), found, pred, fg
+        decision = score_mask(
+            stats,
+            pred,
+            fg,
+            scores,
+            self.kalman.median_area(),
+            view_span=float(min(self.info.width, self.info.height)),
+            updates=self.kalman.updates,
+        )
+        if decision.accept and stats is not None:
+            self.kalman.update(
+                t, stats.x, stats.y, stats.w, stats.h, area=stats.area
+            )
+            self.streak = 0
+            self.last_bad = None
+        else:
+            self.streak += 1
+            if stats is not None:
+                self.last_bad = (stats.x, stats.y)
+        return decision, stats, pred, fg
+
+    def _foreground(self, abs_frame: int) -> Foreground | None:
+        rgb = self._rgb(abs_frame)
+        fg = None
+        if rgb is not None and self.prev_rgb is not None:
+            try:
+                fg = motion_foreground(self.prev_rgb, rgb)
+            except Exception:  # noqa: BLE001
+                fg = None
+        if rgb is not None:
+            self.prev_rgb = rgb
+        return fg
+
+    def _rgb(self, abs_frame: int) -> np.ndarray | None:
+        try:
+            if self.decoder is None:
+                self.decoder = FrameDecoder(self.info)
+            return self.decoder.frame(abs_frame)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def maybe_reprompt(
+        self,
+        abs_frame: int,
+        pred: PredictedBox | None,
+        fg: Foreground | None,
+    ) -> TrackPrompt | None:
+        if self.streak < REJECT_STREAK or abs_frame in self.reprompted:
+            return None
+        if pred is None or fg is None or not fg.blobs:
+            return None
+        prompt = reprompt_candidate(
+            fg.blobs,
+            pred,
+            expected_area=self.kalman.median_area(),
+            scale=fg.scale,
+        )
+        if prompt is None:
+            return None
+        self.reprompted.add(abs_frame)
+        return replace(prompt, frame=abs_frame)
+
+
 class Sam2Tracker(Tracker):
     """Official desktop tracker. Requires SAM 2 unless a predictor is injected."""
 
@@ -199,11 +346,14 @@ class Sam2Tracker(Tracker):
         predictor: VideoPredictor | None = None,
         *,
         spec: ModelSpec | None = None,
+        anti_interference: bool = True,
     ) -> None:
         self._predictor = predictor
         self._spec = spec or DEFAULT_SPEC
         self.name = self._spec.model_id
         self.version = self._spec.version
+        self.anti_interference = bool(anti_interference)
+        self.dropped_frames: list[int] = []
 
     def track(
         self,
@@ -218,6 +368,7 @@ class Sam2Tracker(Tracker):
         object_id: int = 1,
         stride: int = 1,
         image_size: int | None = None,
+        anti_interference: bool | None = None,
         **_unused: Any,
     ) -> TrackResult:
         t0 = time.perf_counter()
@@ -246,126 +397,65 @@ class Sam2Tracker(Tracker):
             predictor = load_sam2_predictor(self._spec, download=False)
             self._predictor = predictor
 
-        local_hints = hints
-        sampled_index = {frame: i for i, frame in enumerate(sampled)}
-        if is_sam2_predictor(predictor):
-            decode_size = int(image_size or predictor.image_size)
-            native_size = int(predictor.image_size)
-            offload = should_offload_video(predictor.device, len(sampled), native_size)
-            images, height, width = load_frames_for_sam2(
-                info,
-                decode_size,
-                start,
-                last,
-                compute_device=predictor.device,
-                offload_video_to_cpu=offload,
-                progress=progress,
-                cancel=cancel,
-                frame_indices=sampled,
-            )
-            if cancel and cancel.cancelled:
-                return TrackResult(
-                    clip_id=info.path.stem,
-                    points=[],
-                    failure_reason=FailureReason.CANCELLED,
-                    model_name=self.name,
-                    model_version=self.version,
-                    elapsed_s=time.perf_counter() - t0,
+        sampled_points: list[TrackPoint] = []
+        contours: dict[int, list[tuple[float, float]]] = {}
+        total = last - start + 1
+        _emit(progress, info.path.stem, 0, total, "track")
+        enabled = self.anti_interference if anti_interference is None else bool(anti_interference)
+        guard = _GuardSession(info, enabled)
+        self.dropped_frames = []
+        cancelled = False
+        try:
+            if is_sam2_predictor(predictor):
+                cancelled = self._track_windows(
+                    predictor,
+                    info,
+                    sampled,
+                    hints,
+                    seed_xy,
+                    object_id,
+                    start,
+                    total,
+                    sampled_points,
+                    contours,
+                    guard=guard,
+                    cancel=cancel,
+                    progress=progress,
                 )
-            if images is None:
-                raise ModelNotAvailable("未能解码用于 SAM 2 的视频帧")
-            if images.shape[-1] != native_size:
-                import torch.nn.functional as F
-
-                images = F.interpolate(
-                    images,
-                    size=(native_size, native_size),
-                    mode="bilinear",
-                    align_corners=False,
+            else:
+                cancelled = self._track_whole(
+                    predictor,
+                    info,
+                    sampled,
+                    hints,
+                    seed_xy,
+                    object_id,
+                    start,
+                    last,
+                    total,
+                    sampled_points,
+                    contours,
+                    guard=guard,
+                    cancel=cancel,
+                    progress=progress,
                 )
-            if not offload:
-                images = images.to(predictor.device)
-            state = build_video_state(
-                predictor,
-                images,
-                height,
-                width,
-                offload_video_to_cpu=offload,
-            )
-            local_hints = remap_prompts_to_samples(hints, sampled, seed_xy)
-            propagate_start = 0
-            propagate_count = len(sampled)
-        else:
-            state = predictor.init_state(str(info.path))
-            local_hints = hints
-            propagate_start = start
-            propagate_count = last - start + 1
-
-        self._apply_prompts(predictor, state, local_hints, object_id)
-        if cancel and cancel.cancelled:
+        finally:
+            self.dropped_frames = list(guard.dropped)
+            guard.close()
+        if cancelled:
             return TrackResult(
                 clip_id=info.path.stem,
-                points=[],
+                points=sampled_points,
                 failure_reason=FailureReason.CANCELLED,
                 model_name=self.name,
                 model_version=self.version,
                 elapsed_s=time.perf_counter() - t0,
             )
 
-        sampled_points: list[TrackPoint] = []
-        contours: dict[int, list[tuple[float, float]]] = {}
-        total = last - start + 1
-        _emit(progress, info.path.stem, 0, total, "track")
-        try:
-            stream = predictor.propagate_in_video(
-                state,
-                start_frame_idx=propagate_start,
-                max_frame_num_to_track=propagate_count,
-            )
-            for payload in stream:
-                if cancel and cancel.cancelled:
-                    return TrackResult(
-                        clip_id=info.path.stem,
-                        points=sampled_points,
-                        failure_reason=FailureReason.CANCELLED,
-                        model_name=self.name,
-                        model_version=self.version,
-                        elapsed_s=time.perf_counter() - t0,
-                    )
-                frame_idx, obj_ids, masks = payload[:3]
-                if is_sam2_predictor(predictor):
-                    idx = int(frame_idx)
-                    if idx < 0 or idx >= len(sampled):
-                        continue
-                    abs_frame = sampled[idx]
-                else:
-                    abs_frame = int(frame_idx)
-                    if abs_frame not in sampled_index:
-                        continue
-                if abs_frame < start or abs_frame > last:
-                    continue
-                mask = self._pick_mask(obj_ids, masks, object_id)
-                x, y, conf, visible, contour = mask_centroid(logits_to_mask(mask))
-                if not visible:
-                    x, y = seed_xy
-                sampled_points.append(
-                    TrackPoint(
-                        frame=abs_frame,
-                        x=x,
-                        y=y,
-                        visible=visible,
-                        confidence=conf,
-                    )
-                )
-                if contour:
-                    contours[abs_frame] = contour
-                _emit(progress, info.path.stem, abs_frame - start + 1, total, "track")
-        except ModelNotAvailable:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            raise ModelNotAvailable(f"SAM 2 推理失败：{exc}") from exc
-
+        sampled_points.sort(key=lambda point: point.frame)
         points = densify_track_points(sampled_points, start, last)
+        if enabled:
+            points = fill_short_gaps(points, info)
         result = TrackResult(
             clip_id=info.path.stem,
             points=points,
@@ -376,6 +466,351 @@ class Sam2Tracker(Tracker):
         )
         result.contours = contours  # type: ignore[attr-defined]
         return result
+
+    def _record(
+        self,
+        payload: Any,
+        abs_frame: int,
+        seed_xy: tuple[float, float],
+        object_id: int,
+        out_points: list[TrackPoint],
+        out_contours: dict[int, list[tuple[float, float]]],
+        *,
+        guard: _GuardSession,
+        state: dict | None = None,
+        local_idx: int | None = None,
+    ) -> tuple[GateDecision, MaskStats | None, PredictedBox | None, Foreground | None]:
+        _idx, obj_ids, masks = payload[:3]
+        mask = self._pick_mask(obj_ids, masks, object_id)
+        binary = logits_to_mask(mask)
+        scores = extract_sam_scores(
+            payload, state, int(_idx if local_idx is None else local_idx), object_id
+        )
+        decision, stats, pred, fg = guard.observe(abs_frame, binary, scores)
+        if stats is None or not decision.accept:
+            x, y = (stats.x, stats.y) if stats is not None else seed_xy
+            note = decision.reason or (REJECT_BACKGROUND if guard.enabled else "")
+            out_points.append(
+                TrackPoint(
+                    frame=abs_frame,
+                    x=x,
+                    y=y,
+                    visible=False,
+                    confidence=decision.confidence,
+                    note=note,
+                )
+            )
+            return decision, stats, pred, fg
+        out_points.append(
+            TrackPoint(
+                frame=abs_frame,
+                x=stats.x,
+                y=stats.y,
+                visible=True,
+                confidence=decision.confidence,
+            )
+        )
+        out_contours[abs_frame] = stats.contour
+        return decision, stats, pred, fg
+
+    @staticmethod
+    def _window_prompts(
+        hints: list[TrackPrompt],
+        window: list[int],
+        seed_xy: tuple[float, float],
+        carry: TrackPrompt | None,
+    ) -> list[TrackPrompt]:
+        if carry is None:
+            return remap_prompts_to_samples(hints, window, seed_xy)
+        index = {frame: i for i, frame in enumerate(window)}
+        local = [carry]
+        local += [replace(p, frame=index[p.frame]) for p in hints if p.frame in index]
+        return local
+
+    @staticmethod
+    def _last_visible_frame(points: list[TrackPoint]) -> int | None:
+        for point in reversed(points):
+            if point.visible:
+                return point.frame
+        return None
+
+    @staticmethod
+    def _rewind_from(
+        out_points: list[TrackPoint],
+        out_contours: dict[int, list[tuple[float, float]]],
+        seen: set[int],
+        abs_frame: int,
+    ) -> None:
+        kept = [p for p in out_points if p.frame < abs_frame]
+        out_points.clear()
+        out_points.extend(kept)
+        for frame in [key for key in out_contours if key >= abs_frame]:
+            del out_contours[frame]
+        seen.difference_update({frame for frame in seen if frame >= abs_frame})
+
+    @staticmethod
+    def _carry_prompt(
+        contours: dict[int, list[tuple[float, float]]],
+        points: list[TrackPoint],
+        frame: int | None,
+    ) -> TrackPrompt | None:
+        """Seed the next window from the last accepted mask, not a jumped one."""
+        if frame is None:
+            return None
+        contour = contours.get(frame)
+        if contour:
+            xs = [pt[0] for pt in contour]
+            ys = [pt[1] for pt in contour]
+            return TrackPrompt(
+                frame=0,
+                kind=PromptKind.BOX,
+                x=min(xs),
+                y=min(ys),
+                x2=max(xs),
+                y2=max(ys),
+            )
+        point = next(
+            (p for p in reversed(points) if p.frame == frame and p.visible), None
+        )
+        if point is None:
+            return None
+        return TrackPrompt(
+            frame=0, kind=PromptKind.POSITIVE, x=point.x, y=point.y
+        )
+
+    def _track_windows(
+        self,
+        predictor: Any,
+        info: VideoInfo,
+        sampled: list[int],
+        hints: list[TrackPrompt],
+        seed_xy: tuple[float, float],
+        object_id: int,
+        start: int,
+        total: int,
+        out_points: list[TrackPoint],
+        out_contours: dict[int, list[tuple[float, float]]],
+        *,
+        guard: _GuardSession,
+        cancel: CancelToken | None,
+        progress: ProgressCb | None,
+    ) -> bool:
+        """Run SAM window by window so memory does not grow with video length."""
+        native = int(predictor.image_size)
+        seen: set[int] = set()
+        carry: TrackPrompt | None = None
+        for window in sample_track_windows(sampled, TRACK_WINDOW_SAMPLED):
+            if cancel and cancel.cancelled:
+                return True
+            offload = should_offload_video(predictor.device, len(window), native)
+            images = LazyFrameTensors(
+                info,
+                window,
+                native,
+                compute_device=predictor.device,
+                offload_video_to_cpu=offload,
+                progress=progress,
+                cancel=cancel,
+            )
+            try:
+                state = build_video_state(
+                    predictor,
+                    images,
+                    info.height,
+                    info.width,
+                    offload_video_to_cpu=offload,
+                )
+                self._apply_prompts(
+                    predictor,
+                    state,
+                    self._window_prompts(hints, window, seed_xy, carry),
+                    object_id,
+                )
+                if cancel and cancel.cancelled:
+                    return True
+                if self._propagate_window(
+                    predictor,
+                    state,
+                    window,
+                    seed_xy,
+                    object_id,
+                    start,
+                    total,
+                    info.path.stem,
+                    out_points,
+                    out_contours,
+                    seen,
+                    guard,
+                    cancel=cancel,
+                    progress=progress,
+                ):
+                    return True
+            except ModelNotAvailable:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                raise ModelNotAvailable(f"SAM 2 推理失败：{exc}") from exc
+            finally:
+                images.close()
+            carry = self._carry_prompt(
+                out_contours, out_points, self._last_visible_frame(out_points)
+            )
+        return False
+
+    def _propagate_window(
+        self,
+        predictor: Any,
+        state: dict,
+        window: list[int],
+        seed_xy: tuple[float, float],
+        object_id: int,
+        start: int,
+        total: int,
+        clip_id: str,
+        out_points: list[TrackPoint],
+        out_contours: dict[int, list[tuple[float, float]]],
+        seen: set[int],
+        guard: _GuardSession,
+        *,
+        cancel: CancelToken | None,
+        progress: ProgressCb | None,
+    ) -> bool:
+        start_idx = 0
+        while start_idx < len(window):
+            stream = predictor.propagate_in_video(
+                state,
+                start_frame_idx=start_idx,
+                max_frame_num_to_track=len(window) - start_idx,
+            )
+            restart: int | None = None
+            for payload in stream:
+                if cancel and cancel.cancelled:
+                    return True
+                idx = int(payload[0])
+                if idx < 0 or idx >= len(window):
+                    continue
+                abs_frame = window[idx]
+                if abs_frame in seen:
+                    continue
+                decision, _stats, pred, fg = self._record(
+                    payload,
+                    abs_frame,
+                    seed_xy,
+                    object_id,
+                    out_points,
+                    out_contours,
+                    guard=guard,
+                    state=state,
+                    local_idx=idx,
+                )
+                seen.add(abs_frame)
+                if not decision.accept:
+                    drop_memory_frame(state, idx)
+                    guard.dropped.append(abs_frame)
+                    extra = guard.maybe_reprompt(abs_frame, pred, fg)
+                    if extra is not None:
+                        prompts = [replace(extra, frame=idx)]
+                        if guard.last_bad is not None:
+                            prompts.append(
+                                TrackPrompt(
+                                    frame=idx,
+                                    kind=PromptKind.NEGATIVE,
+                                    x=guard.last_bad[0],
+                                    y=guard.last_bad[1],
+                                )
+                            )
+                        self._apply_prompts(predictor, state, prompts, object_id)
+                        self._rewind_from(out_points, out_contours, seen, abs_frame)
+                        guard.streak = 0
+                        restart = idx
+                        break
+                _emit(progress, clip_id, abs_frame - start + 1, total, "track")
+            if restart is None:
+                break
+            start_idx = restart
+        return False
+
+    def _track_whole(
+        self,
+        predictor: Any,
+        info: VideoInfo,
+        sampled: list[int],
+        hints: list[TrackPrompt],
+        seed_xy: tuple[float, float],
+        object_id: int,
+        start: int,
+        last: int,
+        total: int,
+        out_points: list[TrackPoint],
+        out_contours: dict[int, list[tuple[float, float]]],
+        *,
+        guard: _GuardSession,
+        cancel: CancelToken | None,
+        progress: ProgressCb | None,
+    ) -> bool:
+        """Predictors that decode the file themselves (tests) stay single-pass."""
+        state = predictor.init_state(str(info.path))
+        self._apply_prompts(predictor, state, hints, object_id)
+        if cancel and cancel.cancelled:
+            return True
+        allowed = set(sampled)
+        try:
+            start_idx = start
+            while start_idx <= last:
+                stream = predictor.propagate_in_video(
+                    state,
+                    start_frame_idx=start_idx,
+                    max_frame_num_to_track=last - start_idx + 1,
+                )
+                restart: int | None = None
+                for payload in stream:
+                    if cancel and cancel.cancelled:
+                        return True
+                    abs_frame = int(payload[0])
+                    if abs_frame not in allowed:
+                        continue
+                    decision, _stats, pred, fg = self._record(
+                        payload,
+                        abs_frame,
+                        seed_xy,
+                        object_id,
+                        out_points,
+                        out_contours,
+                        guard=guard,
+                        state=state if isinstance(state, dict) else None,
+                        local_idx=abs_frame,
+                    )
+                    if not decision.accept:
+                        drop_memory_frame(state if isinstance(state, dict) else None, abs_frame)
+                        guard.dropped.append(abs_frame)
+                        extra = guard.maybe_reprompt(abs_frame, pred, fg)
+                        if extra is not None:
+                            prompts = [replace(extra, frame=abs_frame)]
+                            if guard.last_bad is not None:
+                                prompts.append(
+                                    TrackPrompt(
+                                        frame=abs_frame,
+                                        kind=PromptKind.NEGATIVE,
+                                        x=guard.last_bad[0],
+                                        y=guard.last_bad[1],
+                                    )
+                                )
+                            self._apply_prompts(predictor, state, prompts, object_id)
+                            seen = {p.frame for p in out_points}
+                            self._rewind_from(out_points, out_contours, seen, abs_frame)
+                            guard.streak = 0
+                            restart = abs_frame
+                            break
+                    _emit(
+                        progress, info.path.stem, abs_frame - start + 1, total, "track"
+                    )
+                if restart is None:
+                    break
+                start_idx = restart
+        except ModelNotAvailable:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ModelNotAvailable(f"SAM 2 推理失败：{exc}") from exc
+        return False
 
     @staticmethod
     def _pick_mask(obj_ids: Any, masks: Any, object_id: int) -> Any:

@@ -26,10 +26,12 @@ from app.update_checker import (  # noqa: E402
     is_newer,
     parse_release_assets,
     parse_sha256sums,
+    parse_update_manifest,
     parse_version,
     safe_release_url,
     should_auto_check,
     update_checks_allowed,
+    update_is_required,
 )
 
 
@@ -235,6 +237,101 @@ class UpdateCheckerTests(unittest.TestCase):
                 os.environ.pop("QT_QPA_PLATFORM", None)
             else:
                 os.environ["QT_QPA_PLATFORM"] = old_qt
+
+    def test_update_json_forces_minimum_and_critical(self) -> None:
+        self.assertEqual(
+            parse_update_manifest(
+                {"version": "0.3.3", "minimum_version": "0.3.0", "critical": False}
+            ),
+            ("0.3.0", False),
+        )
+        self.assertEqual(parse_update_manifest({"critical": "false"}), ("", False))
+        self.assertEqual(parse_update_manifest("nope"), ("", False))
+        self.assertFalse(update_is_required("0.3.1", "0.3.0", False))
+        self.assertTrue(update_is_required("0.2.9", "0.3.0", False))
+        self.assertTrue(update_is_required("0.3.2", "0.3.0", True))
+
+        forced = evaluate_release(
+            _payload(),
+            "0.1.0",
+            skipped="v0.2.0",
+            minimum_version="0.3.0",
+        )
+        self.assertEqual(forced.status, UpdateStatus.AVAILABLE)
+        self.assertIn("必须更新", forced.message)
+        self.assertEqual(forced.minimum_version, "0.3.0")
+
+        critical = evaluate_release(
+            _payload(),
+            "0.1.0",
+            skipped="v0.2.0",
+            critical=True,
+        )
+        self.assertEqual(critical.status, UpdateStatus.AVAILABLE)
+        self.assertTrue(critical.critical)
+
+        optional = evaluate_release(
+            _payload(),
+            "0.1.0",
+            skipped="v0.2.0",
+            minimum_version="0.1.0",
+        )
+        self.assertEqual(optional.status, UpdateStatus.SKIPPED)
+
+    def test_missing_update_json_keeps_current_behavior(self) -> None:
+        manifest = {
+            "version": "0.2.0",
+            "minimum_version": "0.2.0",
+            "critical": True,
+        }
+        url = (
+            "https://github.com/haogesong2011-collab/tracklab/"
+            "releases/download/v0.2.0/update.json"
+        )
+
+        def with_manifest(url_called, headers, timeout):
+            del headers, timeout
+            if url_called == GITHUB_API_LATEST:
+                payload = _payload()
+                payload["assets"] = list(payload["assets"]) + [
+                    {
+                        "name": "update.json",
+                        "browser_download_url": url,
+                        "size": 40,
+                    }
+                ]
+                return 200, {}, json.dumps(payload).encode()
+            if url_called == url:
+                return 200, {}, json.dumps(manifest).encode()
+            raise AssertionError(url_called)
+
+        info = check_for_update("0.1.0", skipped="v0.2.0", transport=with_manifest)
+        self.assertEqual(info.status, UpdateStatus.AVAILABLE)
+        self.assertTrue(info.critical)
+
+        def broken(url_called, headers, timeout):
+            del headers, timeout
+            if url_called == GITHUB_API_LATEST:
+                payload = _payload()
+                payload["assets"] = list(payload["assets"]) + [
+                    {
+                        "name": "update.json",
+                        "browser_download_url": url,
+                        "size": 40,
+                    }
+                ]
+                return 200, {}, json.dumps(payload).encode()
+            return 404, {}, b""
+
+        fallback = check_for_update("0.1.0", skipped="v0.2.0", transport=broken)
+        self.assertEqual(fallback.status, UpdateStatus.SKIPPED)
+        self.assertFalse(fallback.critical)
+        self.assertEqual(fallback.minimum_version, "")
+
+    def test_shortcuts_do_not_describe_shift_click_as_negative(self) -> None:
+        text = (ROOT / "app" / "main_window.py").read_text(encoding="utf-8")
+        self.assertNotIn("Shift+点击：负点", text)
+        self.assertIn("Shift+Control 点击：加点", text)
 
 
 if __name__ == "__main__":
