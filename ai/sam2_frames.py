@@ -89,7 +89,7 @@ def densify_track_points(
                     visible=existing.visible,
                     confidence=existing.confidence,
                     manual=existing.manual,
-                    interpolated=False,
+                    interpolated=existing.interpolated,
                     note=existing.note,
                 )
             )

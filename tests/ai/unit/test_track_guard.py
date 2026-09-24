@@ -22,8 +22,10 @@ from ai.track_guard import (  # noqa: E402
     SamScores,
     drop_memory_frame,
     extract_sam_scores,
+    fill_short_gaps,
     mask_stats,
     motion_foreground,
+    recover_from_foreground,
     reprompt_candidate,
     score_mask,
 )
@@ -174,6 +176,52 @@ class MemoryAndScoreTests(unittest.TestCase):
         }
         scores = extract_sam_scores((4, [1], [0]), state, 4, 1)
         self.assertAlmostEqual(scores.object_score or 0.0, -1.0)
+
+
+class GapAndRecoveryTests(unittest.TestCase):
+    def test_single_dropout_is_filled_on_the_parabola(self) -> None:
+        pts_ms = tuple(int(round(i * 1000 / 60)) for i in range(12))
+        info = _info(pts_ms)
+        points = []
+        for i in range(12):
+            t = pts_ms[i] / 1000.0
+            x, y = 100 + 3000 * t, 400 - 1500 * t + 2000 * t * t
+            points.append(TrackPoint(frame=i, x=x, y=y, visible=i != 5, confidence=0.95 if i != 5 else 0.0))
+        filled = fill_short_gaps(points, info)
+        gap = filled[5]
+        t = pts_ms[5] / 1000.0
+        self.assertTrue(gap.visible)
+        self.assertTrue(gap.interpolated)
+        self.assertLess(abs(gap.x - (100 + 3000 * t)), 0.5)
+        self.assertLess(abs(gap.y - (400 - 1500 * t + 2000 * t * t)), 0.5)
+
+    def test_long_gap_and_open_end_stay_missing(self) -> None:
+        pts_ms = tuple(int(round(i * 1000 / 60)) for i in range(30))
+        info = _info(pts_ms)
+        points = [
+            TrackPoint(frame=i, x=float(i), y=0.0, visible=not (5 <= i < 20) and i < 27)
+            for i in range(30)
+        ]
+        filled = fill_short_gaps(points, info)
+        self.assertFalse(any(p.visible for p in filled[5:20]))
+        self.assertFalse(any(p.visible for p in filled[27:]))
+
+    def test_empty_mask_recovers_from_moving_blob(self) -> None:
+        h, w = 80, 120
+        prev = np.zeros((h, w, 3), dtype=np.uint8)
+        cur = np.zeros((h, w, 3), dtype=np.uint8)
+        prev[:, 0::6] = (200, 210, 80)
+        cur[:, 0::6] = (200, 210, 80)
+        yy, xx = np.ogrid[:h, :w]
+        prev[(xx - 30) ** 2 + (yy - 40) ** 2 <= 25] = (240, 40, 40)
+        cur[(xx - 42) ** 2 + (yy - 38) ** 2 <= 25] = (240, 40, 40)
+        fg = motion_foreground(prev, cur)
+        found = recover_from_foreground(
+            fg, PredictedBox(x=41, y=39, w=10, h=10, step=12), expected_area=80.0
+        )
+        self.assertIsNotNone(found)
+        assert found is not None
+        self.assertLess(abs(found.x - 42), 8)
 
 
 class KinematicsRejectTests(unittest.TestCase):

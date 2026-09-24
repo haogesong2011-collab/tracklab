@@ -315,6 +315,7 @@ class StrideDensifyTests(unittest.TestCase):
             start_frame=0,
             end_frame=6,
             stride=2,
+            anti_interference=False,
             prompts=[TrackPrompt(frame=0, kind=PromptKind.POSITIVE, x=seed[0], y=seed[1])],
         )
         by_frame = {p.frame: p for p in result.points}
@@ -642,9 +643,13 @@ class TrackGuardIntegrationTests(unittest.TestCase):
             tracker_mod.TRACK_WINDOW_SAMPLED = original
         jumped = [p for p in result.points if p.frame == 3]
         self.assertTrue(jumped)
-        self.assertFalse(jumped[0].visible)
-        self.assertIn("跳到背景", jumped[0].note)
         self.assertIn(3, tracker.dropped_frames)
+        # The whole-frame mask centre is never reported as the ball.
+        centre = (info.width / 2.0, info.height / 2.0)
+        if jumped[0].visible:
+            self.assertGreater(
+                abs(jumped[0].x - centre[0]) + abs(jumped[0].y - centre[1]), 20.0
+            )
         self.assertGreaterEqual(len(fake.boxes), 1)
         box = fake.boxes[0]
         self.assertLess(box[2] - box[0], 40.0)
@@ -695,10 +700,12 @@ class TrackGuardIntegrationTests(unittest.TestCase):
                 ],
             )
             by_frame = {p.frame: p for p in result.points}
-            for frame in (6, 7):
-                self.assertFalse(by_frame[frame].visible, msg=str(frame))
-                self.assertIn("跳到背景", by_frame[frame].note)
             self.assertTrue({6, 7}.issubset(set(tracker.dropped_frames)))
+            for frame in (6, 7):
+                point = by_frame[frame]
+                if point.visible:
+                    self.assertLess(abs(point.x - truth[frame][0]), 6.0, msg=str(frame))
+                    self.assertLess(abs(point.y - truth[frame][1]), 6.0, msg=str(frame))
             recovered = by_frame[n - 1]
             self.assertTrue(recovered.visible)
             self.assertLess(abs(recovered.x - truth[-1][0]), 3.0)

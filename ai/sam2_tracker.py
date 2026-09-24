@@ -28,6 +28,7 @@ from ai.sam2_frames import (
     sampled_frame_indices,
 )
 from ai.track_guard import (
+    RECOVERED_CONFIDENCE,
     REJECT_BACKGROUND,
     REJECT_STREAK,
     ConstantVelocityKalman,
@@ -38,8 +39,10 @@ from ai.track_guard import (
     SamScores,
     drop_memory_frame,
     extract_sam_scores,
+    fill_short_gaps,
     mask_stats,
     motion_foreground,
+    recover_from_foreground,
     reprompt_candidate,
     score_mask,
     time_s as guard_time_s,
@@ -262,6 +265,13 @@ class _GuardSession:
         t = guard_time_s(self.info, abs_frame)
         pred = self.kalman.predict(t)
         fg = self._foreground(abs_frame)
+        if stats is None and self.kalman.updates >= 2:
+            found = recover_from_foreground(fg, pred, self.kalman.median_area())
+            if found is not None:
+                self.kalman.update(t, found.x, found.y, found.w, found.h, area=found.area)
+                self.streak = 0
+                self.last_bad = None
+                return GateDecision(True, RECOVERED_CONFIDENCE, ""), found, pred, fg
         decision = score_mask(
             stats,
             pred,
@@ -444,6 +454,8 @@ class Sam2Tracker(Tracker):
 
         sampled_points.sort(key=lambda point: point.frame)
         points = densify_track_points(sampled_points, start, last)
+        if enabled:
+            points = fill_short_gaps(points, info)
         result = TrackResult(
             clip_id=info.path.stem,
             points=points,

@@ -23,6 +23,10 @@ FG_MIN_OVERLAP = 0.20
 AREA_EXPLODE = 8.0
 WARMUP_UPDATES = 4
 MIN_DIST_PX = 48.0
+RECOVERED_CONFIDENCE = 0.55
+GAP_MAX_S = 0.12
+GAP_MAX_FRAMES = 8
+GAP_FIT_POINTS = 4
 
 
 @dataclass(frozen=True)
@@ -497,6 +501,98 @@ def reprompt_candidate(
     return TrackPrompt(
         frame=0, kind=PromptKind.POSITIVE, x=chosen.x, y=chosen.y
     )
+
+
+def recover_from_foreground(
+    fg: Foreground | None,
+    pred: PredictedBox | None,
+    expected_area: float | None,
+) -> MaskStats | None:
+    """Measure the ball from the frame difference when SAM returned no mask."""
+    if fg is None or pred is None or not fg.reliable or not fg.blobs:
+        return None
+    prompt = reprompt_candidate(fg.blobs, pred, expected_area=expected_area, scale=fg.scale)
+    if prompt is None:
+        return None
+    half_w = max(2.0, pred.w / 2.0)
+    half_h = max(2.0, pred.h / 2.0)
+    x0, x1 = prompt.x - half_w, prompt.x + half_w
+    y0, y1 = prompt.y - half_h, prompt.y + half_h
+    return MaskStats(
+        x=prompt.x,
+        y=prompt.y,
+        w=2.0 * half_w,
+        h=2.0 * half_h,
+        area=float(expected_area or pred.w * pred.h),
+        contour=[(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+    )
+
+
+def _fit_axis(ts: np.ndarray, vs: np.ndarray, t: float) -> float:
+    degree = 2 if len(ts) >= 4 else 1
+    t0 = float(ts.mean())
+    coeffs = np.polyfit(ts - t0, vs, degree)
+    return float(np.polyval(coeffs, t - t0))
+
+
+def fill_short_gaps(
+    points: list[Any],
+    info: Any,
+    *,
+    max_gap_s: float = GAP_MAX_S,
+    max_gap_frames: int = GAP_MAX_FRAMES,
+    fit_points: int = GAP_FIT_POINTS,
+) -> list[Any]:
+    """Bridge brief SAM dropouts with a local quadratic in real PTS.
+
+    Only gaps with visible, unedited samples on both sides are filled; the
+    result is marked interpolated so it is never mistaken for a measurement.
+    """
+    from dataclasses import replace as _replace
+
+    ordered = sorted(points, key=lambda p: p.frame)
+    n = len(ordered)
+    i = 0
+    while i < n:
+        if ordered[i].visible or ordered[i].manual:
+            i += 1
+            continue
+        j = i
+        while j < n and not ordered[j].visible and not ordered[j].manual:
+            j += 1
+        if i == 0 or j >= n:
+            i = j
+            continue
+        before = [p for p in ordered[max(0, i - fit_points) : i] if p.visible]
+        after = [p for p in ordered[j : j + fit_points] if p.visible]
+        gap_frames = ordered[j].frame - ordered[i - 1].frame - 1
+        gap_s = time_s(info, ordered[j].frame) - time_s(info, ordered[i - 1].frame)
+        if (
+            not before
+            or not after
+            or gap_frames > max_gap_frames
+            or gap_s > max_gap_s + 1e-9
+        ):
+            i = j
+            continue
+        anchors = before + after
+        ts = np.array([time_s(info, p.frame) for p in anchors], dtype=np.float64)
+        xs = np.array([p.x for p in anchors], dtype=np.float64)
+        ys = np.array([p.y for p in anchors], dtype=np.float64)
+        conf = min(before[-1].confidence, after[0].confidence) * 0.8
+        for k in range(i, j):
+            t = time_s(info, ordered[k].frame)
+            ordered[k] = _replace(
+                ordered[k],
+                x=_fit_axis(ts, xs, t),
+                y=_fit_axis(ts, ys, t),
+                visible=True,
+                confidence=float(conf),
+                interpolated=True,
+                note="",
+            )
+        i = j
+    return ordered
 
 
 def _as_float(value: Any) -> float | None:
