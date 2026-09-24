@@ -78,20 +78,35 @@ class MaskGateTests(unittest.TestCase):
     def test_area_jump_is_rejected(self) -> None:
         stats = MaskStats(x=40, y=40, w=80, h=80, area=6400, contour=[(0, 0), (80, 0), (80, 80), (0, 80)])
         pred = PredictedBox(x=40, y=40, w=12, h=12, step=4, sigma=4)
-        decision = score_mask(stats, pred, None, SamScores(4.0, 0.9), median_area=80.0)
+        decision = score_mask(
+            stats, pred, None, SamScores(4.0, 0.9), median_area=80.0, updates=6, view_span=180
+        )
         self.assertFalse(decision.accept)
         self.assertEqual(decision.reason, REJECT_BACKGROUND)
 
-    def test_centroid_jump_is_rejected(self) -> None:
-        stats = MaskStats(x=200, y=20, w=12, h=12, area=80, contour=[(194, 14), (206, 14), (206, 26), (194, 26)])
+    def test_centroid_jump_with_growth_is_rejected(self) -> None:
+        stats = MaskStats(
+            x=200, y=20, w=40, h=40, area=400, contour=[(180, 0), (220, 0), (220, 40), (180, 40)]
+        )
         pred = PredictedBox(x=40, y=40, w=12, h=12, step=4, sigma=4)
-        decision = score_mask(stats, pred, None, SamScores(4.0, 0.9), median_area=80.0)
+        decision = score_mask(
+            stats, pred, None, SamScores(4.0, 0.9), median_area=80.0, updates=6, view_span=180
+        )
         self.assertFalse(decision.accept)
 
-    def test_negative_object_score_is_rejected(self) -> None:
+    def test_fast_ball_is_kept_while_speed_is_unknown(self) -> None:
+        stats = MaskStats(x=110, y=40, w=12, h=12, area=90, contour=[(104, 34), (116, 34), (116, 46), (104, 46)])
+        pred = PredictedBox(x=40, y=40, w=12, h=12, step=8, sigma=8)
+        decision = score_mask(
+            stats, pred, None, SamScores(-0.4, 0.7), median_area=80.0, updates=1, view_span=360
+        )
+        self.assertTrue(decision.accept)
+
+    def test_mild_negative_object_score_stays_visible(self) -> None:
         stats = MaskStats(x=40, y=40, w=12, h=12, area=80, contour=[(34, 34), (46, 34), (46, 46), (34, 46)])
-        decision = score_mask(stats, None, None, SamScores(-2.0, 0.4), median_area=None)
-        self.assertFalse(decision.accept)
+        decision = score_mask(stats, None, None, SamScores(-2.0, 0.4), median_area=None, updates=1)
+        self.assertTrue(decision.accept)
+        self.assertGreaterEqual(decision.confidence, 0.72)
 
     def test_stable_mask_is_accepted(self) -> None:
         stats = MaskStats(x=42, y=41, w=12, h=12, area=90, contour=[(36, 35), (48, 35), (48, 47), (36, 47)])

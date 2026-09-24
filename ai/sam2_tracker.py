@@ -251,15 +251,30 @@ class _GuardSession:
                 return GateDecision(False, 0.0, ""), None, None, None
             conf = float(min(1.0, stats.area / 64.0))
             self.kalman.update(
-                guard_time_s(self.info, abs_frame), stats.x, stats.y, stats.w, stats.h
+                guard_time_s(self.info, abs_frame),
+                stats.x,
+                stats.y,
+                stats.w,
+                stats.h,
+                area=stats.area,
             )
             return GateDecision(True, conf, ""), stats, None, None
         t = guard_time_s(self.info, abs_frame)
         pred = self.kalman.predict(t)
         fg = self._foreground(abs_frame)
-        decision = score_mask(stats, pred, fg, scores, self.kalman.median_area())
+        decision = score_mask(
+            stats,
+            pred,
+            fg,
+            scores,
+            self.kalman.median_area(),
+            view_span=float(min(self.info.width, self.info.height)),
+            updates=self.kalman.updates,
+        )
         if decision.accept and stats is not None:
-            self.kalman.update(t, stats.x, stats.y, stats.w, stats.h)
+            self.kalman.update(
+                t, stats.x, stats.y, stats.w, stats.h, area=stats.area
+            )
             self.streak = 0
             self.last_bad = None
         else:

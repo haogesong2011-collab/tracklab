@@ -20,9 +20,9 @@ FG_MAX_SIDE = 360
 FG_SHIFT_FRAC = 0.08
 FG_MAX_FILL = 0.15
 FG_MIN_OVERLAP = 0.20
-AREA_HIGH = 3.0
-AREA_LOW = 1.0 / 3.0
-MIN_DIST_PX = 8.0
+AREA_EXPLODE = 8.0
+WARMUP_UPDATES = 4
+MIN_DIST_PX = 48.0
 
 
 @dataclass(frozen=True)
@@ -108,6 +108,7 @@ class ConstantVelocityKalman:
         self._areas: deque[float] = deque(maxlen=16)
         self._steps: deque[float] = deque(maxlen=12)
         self._residuals: deque[float] = deque(maxlen=16)
+        self.updates = 0
 
     @property
     def initialized(self) -> bool:
@@ -147,15 +148,32 @@ class ConstantVelocityKalman:
             sigma=self.residual_sigma(),
         )
 
-    def update(self, t: float, x: float, y: float, w: float, h: float) -> PredictedBox:
+    def update(
+        self, t: float, x: float, y: float, w: float, h: float, area: float | None = None
+    ) -> PredictedBox:
         z = np.array([x, y, max(1.0, w), max(1.0, h)], dtype=np.float64)
+        pix = float(area if area is not None else z[2] * z[3])
         if self._x is None:
             self._x = np.array([x, y, 0.0, 0.0, z[2], z[3]], dtype=np.float64)
-            self._P = np.diag([16.0, 16.0, 400.0, 400.0, 16.0, 16.0])
+            self._P = np.diag([64.0, 64.0, 2.5e5, 2.5e5, 64.0, 64.0])
             self._t = float(t)
-            self._areas.append(z[2] * z[3])
+            self._areas.append(pix)
+            self.updates = 1
             return self.predict(t) or PredictedBox(x=x, y=y, w=z[2], h=z[3])
         dt = max(1e-4, float(t) - self._t)
+        if self.updates == 1:
+            vx = (x - float(self._x[0])) / dt
+            vy = (y - float(self._x[1])) / dt
+            step = float(np.hypot(x - self._x[0], y - self._x[1]))
+            self._x = np.array([x, y, vx, vy, z[2], z[3]], dtype=np.float64)
+            self._t = float(t)
+            self._steps.append(max(step, 1e-3))
+            self._areas.append(pix)
+            self.updates = 2
+            return PredictedBox(
+                x=x, y=y, w=float(z[2]), h=float(z[3]), vx=vx, vy=vy, step=step, sigma=MIN_DIST_PX
+            )
+        self.updates += 1
         pred = self._advance(self._x, dt)
         P = self._F(dt) @ self._P @ self._F(dt).T + self._Q(dt)
         H = self._H()
@@ -171,7 +189,7 @@ class ConstantVelocityKalman:
         disp = float(np.hypot(self._x[2] * dt, self._x[3] * dt))
         self._steps.append(max(disp, 1e-3))
         self._residuals.append(step)
-        self._areas.append(float(self._x[4] * self._x[5]))
+        self._areas.append(pix)
         return PredictedBox(
             x=float(self._x[0]),
             y=float(self._x[1]),
@@ -387,48 +405,65 @@ def _overlap_fraction(stats: MaskStats, fg: Foreground) -> float:
     return float(patch.mean())
 
 
+def search_limit(pred: PredictedBox, view_span: float, updates: int) -> float:
+    """How far the ball may move before a mask is a jump.
+
+    Until velocity is known, allow a large fraction of the frame. After that,
+    follow recent motion. A few pixels of slack was rejecting every fast ball.
+    """
+    span = max(float(view_span), MIN_DIST_PX)
+    if updates < WARMUP_UPDATES:
+        return max(0.22 * span, 4.0 * pred.step, MIN_DIST_PX)
+    return max(4.0 * pred.step, 3.0 * pred.sigma, 0.04 * span, MIN_DIST_PX)
+
+
 def score_mask(
     stats: MaskStats | None,
     pred: PredictedBox | None,
     fg: Foreground | None,
     sam: SamScores | None = None,
     median_area: float | None = None,
+    *,
+    view_span: float = 720.0,
+    updates: int = 0,
 ) -> GateDecision:
+    """Reject only a mask that left the ball and grew into the background.
+
+    A mildly negative SAM object score, a smaller mask, or a fast but
+    continuous move stays visible. Those used to wipe almost the whole track.
+    """
     if stats is None:
         return GateDecision(False, 0.0, REJECT_BACKGROUND)
     sam = sam or SamScores()
-    if sam.object_score is not None and sam.object_score < 0.0:
-        return GateDecision(False, 0.0, REJECT_BACKGROUND)
-
-    motion = 1.0
+    dist = 0.0
+    limit = search_limit(
+        pred or PredictedBox(x=stats.x, y=stats.y, w=stats.w, h=stats.h),
+        view_span,
+        updates,
+    )
     if pred is not None:
         dist = float(np.hypot(stats.x - pred.x, stats.y - pred.y))
-        limit = max(3.0 * pred.sigma, 2.0 * pred.step, MIN_DIST_PX)
-        motion = float(np.exp(-dist / max(limit, 1e-3)))
-        if dist > limit:
-            return GateDecision(False, min(0.25, motion), REJECT_BACKGROUND)
-
+    ratio = 1.0
     if median_area is not None and median_area > 4.0:
         ratio = stats.area / median_area
-        if ratio > AREA_HIGH or ratio < AREA_LOW:
-            return GateDecision(False, 0.2, REJECT_BACKGROUND)
+    exploded = ratio >= AREA_EXPLODE
+    far = pred is not None and dist > limit
+    # Foliage grab: the mask both leaves the prediction and covers much more.
+    jumped = far and ratio >= 3.0
+    if updates >= 2 and (exploded or jumped):
+        return GateDecision(False, 0.2, REJECT_BACKGROUND)
+    # A clearly absent object that is also far from the ball. Logit alone is not enough:
+    # small or blurred balls often sit slightly below zero.
+    if sam.object_score is not None and sam.object_score < -6.0 and far:
+        return GateDecision(False, 0.0, REJECT_BACKGROUND)
 
-    if (
-        fg is not None
-        and fg.reliable
-        and median_area is not None
-        and stats.area > 2.0 * median_area
-    ):
-        overlap = _overlap_fraction(stats, fg)
-        if overlap < FG_MIN_OVERLAP:
-            return GateDecision(False, 0.2, REJECT_BACKGROUND)
-
+    motion = 1.0 if limit <= 0 else float(np.exp(-dist / limit))
     iou = 1.0 if sam.iou is None else float(np.clip(sam.iou, 0.0, 1.0))
     obj = 1.0
     if sam.object_score is not None:
-        obj = float(1.0 / (1.0 + np.exp(-sam.object_score)))
-    confidence = float(np.clip(0.50 * obj + 0.30 * iou + 0.20 * motion, 0.0, 1.0))
-    return GateDecision(True, max(confidence, 0.05), "")
+        obj = float(1.0 / (1.0 + np.exp(-float(sam.object_score))))
+    blended = 0.45 * max(obj, 0.7) + 0.25 * max(iou, 0.6) + 0.30 * motion
+    return GateDecision(True, float(np.clip(max(blended, 0.72), 0.0, 1.0)), "")
 
 
 def reprompt_candidate(
