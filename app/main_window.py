@@ -195,6 +195,7 @@ class MainWindow(QMainWindow):
         self._ai_worker = None
         self._sam_thread: QThread | None = None
         self._track_mode = TrackMode.PRECISE
+        self._anti_interference = True
         self._shake_thread = None
         self._shake_worker = None
         self._shake: ShakeCompensation | None = None
@@ -601,6 +602,14 @@ class MainWindow(QMainWindow):
         track_menu.addSeparator()
         track_menu.addAction(self._fast_track_action)
         track_menu.addAction(self._precise_track_action)
+        self._anti_interference_action = QAction("抗干扰（背景相减 + 运动预测）", self)
+        self._anti_interference_action.setCheckable(True)
+        self._anti_interference_action.setChecked(True)
+        self._anti_interference_action.setToolTip(
+            "拒收跳到条纹或树叶上的掩膜，并在预测位置附近自动补点"
+        )
+        self._anti_interference_action.toggled.connect(self._set_anti_interference)
+        track_menu.addAction(self._anti_interference_action)
         new_track = track_menu.addAction("新建轨迹")
         new_track.triggered.connect(self._new_track)
         mgr = track_menu.addAction("轨迹管理器")
@@ -1692,6 +1701,7 @@ class MainWindow(QMainWindow):
             end_frame=end,
             prompts=layer.prompts,
             track_mode=self._track_mode,
+            anti_interference=self._anti_interference,
             thread=thread,
         )
         self._ai_worker = worker
@@ -1896,6 +1906,15 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("已切换快速预览（Tiny，隔帧插值）。", 4000)
         else:
             self.statusBar().showMessage("已切换精准分析（Small，逐帧）。", 4000)
+
+    def _set_anti_interference(self, enabled: bool) -> None:
+        self._anti_interference = bool(enabled)
+        if getattr(self, "_anti_interference_action", None) is not None:
+            self._anti_interference_action.setChecked(self._anti_interference)
+        if self._anti_interference:
+            self.statusBar().showMessage("已开启抗干扰：跳到背景的点会被拒收。", 4000)
+        else:
+            self.statusBar().showMessage("已关闭抗干扰，使用原始 SAM 2 轨迹。", 4000)
 
     def _stop_shake(self) -> None:
         if self._shake_worker is not None:
@@ -2949,6 +2968,13 @@ class MainWindow(QMainWindow):
             self._set_track_mode(TrackMode(str(mode)), announce=False)
         except ValueError:
             self._set_track_mode(TrackMode.PRECISE, announce=False)
+        raw_guard = settings.value("track/anti_interference", True)
+        if isinstance(raw_guard, str):
+            self._anti_interference = raw_guard.strip().lower() not in {"0", "false", "no"}
+        else:
+            self._anti_interference = bool(raw_guard)
+        if getattr(self, "_anti_interference_action", None) is not None:
+            self._anti_interference_action.setChecked(self._anti_interference)
 
     def _save_window_prefs(self) -> None:
         if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
@@ -2961,6 +2987,7 @@ class MainWindow(QMainWindow):
         settings.setValue("assistant/report_model", self._report_model)
         settings.setValue("assistant/teaching_level", self._assistant_state.teaching_level.value)
         settings.setValue("track/mode", self._track_mode.value)
+        settings.setValue("track/anti_interference", self._anti_interference)
 
     def _load_assistant_prefs(self, settings: QSettings) -> None:
         chat = settings.value("assistant/chat_model", DEFAULT_CHAT_MODEL)

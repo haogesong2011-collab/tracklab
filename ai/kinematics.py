@@ -117,11 +117,16 @@ class QuantityFit:
 def is_low_confidence(sample: KinematicSample) -> bool:
     if sample.visible and sample.confidence < LOW_CONFIDENCE:
         return True
-    return any(flag in sample.quality_flags for flag in ("extrapolated", "off_plane", "ai_estimate"))
+    return any(
+        flag in sample.quality_flags
+        for flag in ("extrapolated", "off_plane", "ai_estimate", "background_jump")
+    )
 
 
 def quality_label(sample: KinematicSample) -> str:
     flags = sample.quality_flags
+    if "background_jump" in flags:
+        return "已拒收"
     if "ai_estimate" in flags:
         return "AI估计"
     if "off_plane" in flags:
@@ -143,7 +148,9 @@ def quality_tooltip(sample: KinematicSample) -> str:
         bits.append(f"σx={sample.sigma_x:.4f} m  σy={sample.sigma_y:.4f} m")
     if sample.off_plane_m is not None:
         bits.append(f"离面残差 {sample.off_plane_m:.3f} m")
-    if sample.visible and sample.confidence < LOW_CONFIDENCE:
+    if "background_jump" in sample.quality_flags:
+        bits.append("已拒收：疑似跳到背景")
+    elif sample.visible and sample.confidence < LOW_CONFIDENCE:
         bits.append(f"跟踪置信度 {sample.confidence:.2f}")
     return " · ".join(bits)
 
@@ -192,6 +199,8 @@ def series_for_result(
         flags: list[str] = []
         source = "pixel"
         sigma_x = sigma_y = off_m = None
+        if point.note:
+            flags.append("background_jump")
         if point.visible:
             source = cal.measurement_source(point.x, point.y)
             if cal.active and cal.mode is CalibrationMode.PLANAR:

@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from ai.contracts import TrackLayer, TrackResult
-from ai.kinematics import is_low_confidence, series_for_result
+from ai.kinematics import is_low_confidence, quality_tooltip, series_for_result
 from app.data_views import VX_NAME, VY_NAME, speed_axis_label
 from engine.video_index import VideoInfo
 
@@ -264,7 +264,11 @@ class TrackDataPanel(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, sample.frame)
                 if low:
                     item.setForeground(warn)
-                    item.setToolTip(f"低可信度：{sample.confidence:.2f}")
+                    tip = quality_tooltip(sample)
+                    if "已拒收" in tip:
+                        item.setToolTip(tip)
+                    else:
+                        item.setToolTip(f"低可信度：{sample.confidence:.2f}")
                 self._table.setItem(row, col, item)
         self._table.resizeColumnsToContents()
         for col in range(self._table.columnCount()):

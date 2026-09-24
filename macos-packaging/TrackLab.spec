@@ -166,6 +166,7 @@ hiddenimports = [
     "ai.charuco",
     "ai.depth_audit",
     "ai.autotracker",
+    "ai.track_guard",
 ]
 hiddenimports += collect_submodules("app")
 hiddenimports += collect_submodules("engine")

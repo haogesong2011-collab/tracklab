@@ -71,6 +71,7 @@ class PackagingMetadataTests(unittest.TestCase):
         self.assertIn("ai.charuco", spec)
         self.assertIn("ai.depth_audit", spec)
         self.assertIn("ai.autotracker", spec)
+        self.assertIn("ai.track_guard", spec)
 
     def test_spec_filters_analysis_output_not_just_collect_all(self) -> None:
         spec = (ROOT / "macos-packaging" / "TrackLab.spec").read_text(encoding="utf-8")

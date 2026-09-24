@@ -671,6 +671,44 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertEqual(window._track_mode, TrackMode.FAST)
         window.close()
 
+    def test_anti_interference_menu_and_rejected_row(self) -> None:
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QApplication
+
+        from ai.track_guard import REJECT_BACKGROUND
+        from app.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        _ = app
+        window = MainWindow()
+        self.assertTrue(window._anti_interference)
+        self.assertTrue(window._anti_interference_action.isChecked())
+        window._anti_interference_action.setChecked(False)
+        self.assertFalse(window._anti_interference)
+        window._set_anti_interference(True)
+        self.assertTrue(window._anti_interference)
+        window._new_track()
+        layer = window._tracks[0]
+        layer.result = TrackResult(
+            clip_id="c",
+            points=[
+                TrackPoint(
+                    frame=0, x=8, y=8, visible=False, confidence=0.2, note=REJECT_BACKGROUND
+                ),
+                TrackPoint(frame=1, x=12, y=8, visible=True, confidence=0.95),
+            ],
+        )
+        window._refresh_track_ui()
+        warn = QColor("#f0c14b")
+        self.assertEqual(
+            window._data_panel._table.item(0, 2).foreground().color().name(), warn.name()
+        )
+        self.assertIn("已拒收：疑似跳到背景", window._data_panel._table.item(0, 2).toolTip())
+        self.assertNotEqual(
+            window._data_panel._table.item(1, 2).foreground().color().name(), warn.name()
+        )
+        window.close()
+
     def test_low_confidence_yellow_and_calibration_units(self) -> None:
         from PySide6.QtCharts import QScatterSeries
         from PySide6.QtGui import QColor

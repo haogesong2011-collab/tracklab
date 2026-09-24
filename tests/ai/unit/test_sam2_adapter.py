@@ -447,15 +447,27 @@ class _FakeSam2Like:
 
     image_size = 32
 
-    def __init__(self, info) -> None:  # noqa: ANN001
+    def __init__(
+        self,
+        info,  # noqa: ANN001
+        *,
+        jump_local: set[int] | None = None,
+        jump_first_window_last: bool = False,
+        truth: list[tuple[float, float]] | None = None,
+    ) -> None:
         import torch
 
         self.device = torch.device("cpu")
         self._info = info
         self.windows: list[int] = []
         self.prompt_kinds: list[list[str]] = []
+        self.boxes: list[list[float]] = []
         self._cx = 0.0
         self._cy = 0.0
+        self.jump_local = set(jump_local or [])
+        self.jump_first_window_last = jump_first_window_last
+        self.truth = truth
+        self._first_window_jumped = False
 
     def _get_image_feature(self, state, frame_idx, batch_size):  # noqa: ANN001
         _ = state["images"][frame_idx]
@@ -468,27 +480,71 @@ class _FakeSam2Like:
         kinds = []
         if box is not None:
             kinds.append("box")
+            box = np.asarray(box, dtype=np.float32).reshape(-1)
+            self.boxes.append([float(v) for v in box.tolist()])
             self._cx = float((box[0] + box[2]) / 2.0)
             self._cy = float((box[1] + box[3]) / 2.0)
         if points is not None and len(points):
             kinds.append("points")
-            self._cx, self._cy = float(points[0][0]), float(points[0][1])
+            pts = np.asarray(points, dtype=np.float32).reshape(-1, 2)
+            labs = (
+                np.ones(len(pts))
+                if labels is None
+                else np.asarray(labels, dtype=np.float32).reshape(-1)
+            )
+            pos = pts[labs > 0] if len(labs) == len(pts) else pts
+            if len(pos) == 0:
+                pos = pts
+            self._cx, self._cy = float(pos[0, 0]), float(pos[0, 1])
         self.prompt_kinds.append(kinds)
+        idx = int(frame_idx)
+        if idx > 0:
+            self.jump_local = {j for j in self.jump_local if j < idx}
         return frame_idx, [obj_id], [self._disk(self._cx, self._cy)]
 
     def propagate_in_video(  # noqa: ANN001
         self, inference_state, start_frame_idx=0, max_frame_num_to_track=None, **kw
     ):
-        n = inference_state["num_frames"]
-        count = n if max_frame_num_to_track is None else min(n, max_frame_num_to_track)
-        for i in range(count):
-            yield i, [1], [self._disk(self._cx + i, self._cy)]
+        n = int(inference_state["num_frames"])
+        start = int(start_frame_idx or 0)
+        remain = max(0, n - start)
+        count = remain if max_frame_num_to_track is None else min(remain, int(max_frame_num_to_track))
+        outs = inference_state.setdefault("output_dict", {}).setdefault(
+            "non_cond_frame_outputs", {}
+        )
+        window_no = max(0, len(self.windows) - 1)
+        for i in range(start, start + count):
+            huge = i in self.jump_local
+            if (
+                self.jump_first_window_last
+                and window_no == 0
+                and i == n - 1
+                and not self._first_window_jumped
+            ):
+                huge = True
+                self._first_window_jumped = True
+            if huge:
+                mask = self._huge()
+                outs[i] = {"object_score_logits": -3.0, "iou_predictions": 0.1}
+            elif self.truth is not None and i < len(self.truth):
+                mask = self._disk(*self.truth[i])
+                outs[i] = {"object_score_logits": 4.0, "iou_predictions": 0.9}
+            else:
+                mask = self._disk(self._cx + (i - start), self._cy)
+                outs[i] = {"object_score_logits": 4.0, "iou_predictions": 0.9}
+            yield i, [1], [mask]
 
     def _disk(self, cx: float, cy: float):
         h, w = self._info.height, self._info.width
         yy, xx = np.ogrid[:h, :w]
         inside = (xx - cx) ** 2 + (yy - cy) ** 2 <= 36
         return np.where(inside, 8.0, -8.0).astype(np.float32)[None, ...]
+
+    def _huge(self):
+        h, w = self._info.height, self._info.width
+        logits = np.full((h, w), -8.0, dtype=np.float32)
+        logits[2 : h - 2, 2 : w - 2] = 8.0
+        return logits[None, ...]
 
 
 class WindowedTrackTests(unittest.TestCase):
@@ -550,6 +606,120 @@ class WindowedTrackTests(unittest.TestCase):
             info, (20.0, 20.0), start_frame=0, end_frame=8, cancel=token, progress=progress
         )
         self.assertEqual(result.failure_reason, FailureReason.CANCELLED)
+
+
+class TrackGuardIntegrationTests(unittest.TestCase):
+    def _info(self):
+        _ensure_fixtures()
+        manifest = load_manifest()
+        entry = next(e for e in manifest.entries if e.clip_id == "track_ball_normal")
+        return load_video(resolve_video(entry))
+
+    def test_window_carry_uses_last_good_mask_not_jumped_frame(self) -> None:
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            self.skipTest("torch not installed")
+        import ai.sam2_tracker as tracker_mod
+
+        info = self._info()
+        last = min(11, info.frame_count - 1)
+        fake = _FakeSam2Like(info, jump_first_window_last=True)
+        original = tracker_mod.TRACK_WINDOW_SAMPLED
+        tracker_mod.TRACK_WINDOW_SAMPLED = 4
+        try:
+            tracker = tracker_mod.Sam2Tracker(predictor=fake)
+            result = tracker.track(
+                info,
+                (20.0, 20.0),
+                start_frame=0,
+                end_frame=last,
+                prompts=[
+                    TrackPrompt(frame=0, kind=PromptKind.POSITIVE, x=20.0, y=20.0)
+                ],
+            )
+        finally:
+            tracker_mod.TRACK_WINDOW_SAMPLED = original
+        jumped = [p for p in result.points if p.frame == 3]
+        self.assertTrue(jumped)
+        self.assertFalse(jumped[0].visible)
+        self.assertIn("跳到背景", jumped[0].note)
+        self.assertIn(3, tracker.dropped_frames)
+        self.assertGreaterEqual(len(fake.boxes), 1)
+        box = fake.boxes[0]
+        self.assertLess(box[2] - box[0], 40.0)
+        self.assertLess(box[3] - box[1], 40.0)
+        self.assertTrue(any("box" in kinds for kinds in fake.prompt_kinds[1:]))
+
+    def test_jumped_mask_is_rejected_and_reprompt_recovers(self) -> None:
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            self.skipTest("torch not installed")
+        from tests.ai.generate_fixtures import _write_video
+
+        n = 16
+        width, height = 160, 120
+        truth: list[tuple[float, float]] = []
+        frames: list[np.ndarray] = []
+        rng = np.random.default_rng(0)
+        for i in range(n):
+            img = np.zeros((height, width, 3), dtype=np.uint8)
+            img[:, :] = (28, 36, 24)
+            img[:, 0::10] = (190, 210, 70)
+            img[:, 1::10] = (50, 90, 40)
+            img = np.clip(
+                img.astype(np.int16) + rng.integers(0, 28, img.shape), 0, 255
+            ).astype(np.uint8)
+            cx = 28.0 + i * 5.5
+            cy = 85.0 - 0.18 * i * i
+            yy, xx = np.ogrid[:height, :width]
+            img[(xx - cx) ** 2 + (yy - cy) ** 2 <= 36] = (240, 70, 50)
+            frames.append(img)
+            truth.append((cx, cy))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "stripes.mp4"
+            _write_video(path, frames, fps=30)
+            info = load_video(path)
+            fake = _FakeSam2Like(info, jump_local={6, 7, 8}, truth=truth)
+            tracker = Sam2Tracker(predictor=fake)
+            result = tracker.track(
+                info,
+                truth[0],
+                start_frame=0,
+                end_frame=n - 1,
+                prompts=[
+                    TrackPrompt(
+                        frame=0, kind=PromptKind.POSITIVE, x=truth[0][0], y=truth[0][1]
+                    )
+                ],
+            )
+            by_frame = {p.frame: p for p in result.points}
+            for frame in (6, 7):
+                self.assertFalse(by_frame[frame].visible, msg=str(frame))
+                self.assertIn("跳到背景", by_frame[frame].note)
+            self.assertTrue({6, 7}.issubset(set(tracker.dropped_frames)))
+            recovered = by_frame[n - 1]
+            self.assertTrue(recovered.visible)
+            self.assertLess(abs(recovered.x - truth[-1][0]), 3.0)
+            self.assertLess(abs(recovered.y - truth[-1][1]), 3.0)
+            raw = Sam2Tracker(
+                predictor=_FakeSam2Like(info, jump_local={6, 7, 8}, truth=truth)
+            ).track(
+                info,
+                truth[0],
+                start_frame=0,
+                end_frame=n - 1,
+                anti_interference=False,
+                prompts=[
+                    TrackPrompt(
+                        frame=0, kind=PromptKind.POSITIVE, x=truth[0][0], y=truth[0][1]
+                    )
+                ],
+            )
+            jumped = next(p for p in raw.points if p.frame == 6)
+            self.assertTrue(jumped.visible)
+            self.assertGreater(jumped.x, 40.0)
 
 
 class FastModeResolutionTests(unittest.TestCase):

@@ -118,6 +118,7 @@ class TrackWorker(QObject):
         prompts: list[TrackPrompt] | None = None,
         tracker=None,  # noqa: ANN001
         track_mode: TrackMode = TrackMode.PRECISE,
+        anti_interference: bool = True,
     ) -> None:
         super().__init__(parent)
         self._path = Path(video_path)
@@ -129,6 +130,7 @@ class TrackWorker(QObject):
         self._prompts = list(prompts or [])
         self._tracker = tracker
         self._track_mode = track_mode
+        self._anti_interference = bool(anti_interference)
 
     def cancel(self) -> None:
         self._token.cancel()
@@ -161,6 +163,7 @@ class TrackWorker(QObject):
                 prompts=self._prompts,
                 stride=stride,
                 image_size=image_size,
+                anti_interference=self._anti_interference,
             )
             result.track_id = self.track_id  # type: ignore[attr-defined]
             self.finished.emit(result)
@@ -266,6 +269,7 @@ def run_track_in_thread(
     prompts: list[TrackPrompt] | None = None,
     tracker=None,  # noqa: ANN001
     track_mode: TrackMode = TrackMode.PRECISE,
+    anti_interference: bool = True,
     thread: QThread | None = None,
 ) -> tuple[QThread, TrackWorker]:
     """Spawn or queue a track job. Never reuse FramePump's thread."""
@@ -278,6 +282,7 @@ def run_track_in_thread(
         prompts=prompts,
         tracker=tracker,
         track_mode=track_mode,
+        anti_interference=anti_interference,
     )
     owned = thread is None
     if thread is None:
