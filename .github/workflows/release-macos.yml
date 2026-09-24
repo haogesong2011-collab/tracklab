@@ -124,6 +124,7 @@ jobs:
           test -f dist-upload/TrackLab-arm64.dmg
           test -f dist-upload/TrackLab-x86_64.dmg
           (cd dist-upload && sha256sum TrackLab-arm64.dmg TrackLab-x86_64.dmg > SHA256SUMS.txt)
+          python macos-packaging/write_update_json.py dist-upload/update.json
           python macos-packaging/release_notes.py "${GITHUB_REF_NAME}" > dist-upload/NOTES.md
           cat dist-upload/SHA256SUMS.txt
       - name: Create GitHub Release
@@ -135,4 +136,5 @@ jobs:
             --notes-file dist-upload/NOTES.md \
             dist-upload/TrackLab-arm64.dmg \
             dist-upload/TrackLab-x86_64.dmg \
-            dist-upload/SHA256SUMS.txt
+            dist-upload/SHA256SUMS.txt \
+            dist-upload/update.json
