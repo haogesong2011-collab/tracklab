@@ -86,4 +86,4 @@ macOS 安装包由 `.github/workflows/release-macos.yml` 在打 `v*` tag 时构�
 ## 贡献者
 
 - [haogesong2011-collab](https://github.com/haogesong2011-collab)
-- [StarryNight-ye](https://github.com/StarryNight-ye)：视频和函数图的拖动平移；抗干扰跟踪
+- [StarryNight-ye](https://github.com/StarryNight-ye)

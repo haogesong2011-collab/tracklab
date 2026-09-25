@@ -1,0 +1,16 @@
+---
+description: 提交和发布时带上 StarryNight-ye，不单列他的具体贡献
+alwaysApply: true
+---
+
+# 贡献者
+
+StarryNight-ye 是 TrackLab 的贡献者。以后每次 git 提交、推送到 GitHub、创建 Release 时，都加上：
+
+```
+Co-authored-by: StarryNight-ye <278659334+StarryNight-ye@users.noreply.github.com>
+```
+
+不要在 README、更新说明或提交说明里分开写他做了哪几项。贡献者名单只写名字。
+
+不要用 `xiestarrynight@gmai.com`。那个邮箱少了一个字母，GitHub 对不上账号。
