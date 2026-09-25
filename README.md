@@ -82,3 +82,8 @@ TRACKLAB_SKIP_UPDATE_CHECK=1 python -m tests.ai.ci
 macOS 安装包由 `.github/workflows/release-macos.yml` 在打 `v*` tag 时构建。本地打包见 `macos-packaging/build_macos.sh`（捆绑 Tiny 权重；精准 Small 首次使用时下载）。帮助菜单「检查更新」在安装包里可点「立即更新」，下载 DMG 并替换当前应用后重启。从源码运行时仍打开 GitHub Releases 页面。
 
 数据约定见 [datasets/README.md](datasets/README.md)。Holdout 槽位（约 20%）选型期间禁止调参。
+
+## 贡献者
+
+- [haogesong2011-collab](https://github.com/haogesong2011-collab)
+- [StarryNight-ye](https://github.com/StarryNight-ye)：视频和函数图的拖动平移；抗干扰跟踪
