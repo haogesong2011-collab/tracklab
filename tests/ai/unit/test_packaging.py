@@ -126,6 +126,8 @@ class PackagingMetadataTests(unittest.TestCase):
         self.assertIn("update-${{ matrix.arch }}.json", workflow)
         self.assertIn("--patch-manifest", workflow)
         self.assertIn("conda-forge", workflow)
+        self.assertIn("bash -el {0}", workflow)
+        self.assertNotIn("matrix.shell", workflow)
         self.assertIn("dist-upload/update.json", workflow)
         self.assertIn("write_update_json.py", workflow)
         self.assertIn("MACOS_CERT", script)

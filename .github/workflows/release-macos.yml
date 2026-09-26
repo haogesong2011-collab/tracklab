@@ -44,12 +44,10 @@ jobs:
         include:
           - os: macos-15
             arch: arm64
-            shell: "bash --noprofile --norc -eo pipefail {0}"
           # Last GitHub-hosted Intel image; scheduled to retire August 2027.
           # PyPI has no macOS x86_64 torch wheel after 2.2; Intel uses conda-forge.
           - os: macos-15-intel
             arch: x86_64
-            shell: "bash -el {0}"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -66,7 +64,6 @@ jobs:
           channel-priority: strict
           auto-update-conda: false
       - name: Verify architecture
-        shell: ${{ matrix.shell }}
         run: |
           python - <<'PY'
           import os
@@ -81,12 +78,13 @@ jobs:
           EXPECTED_ARCH: ${{ matrix.arch }}
       - name: Install Intel PyTorch
         if: matrix.arch == 'x86_64'
-        shell: bash -el {0}
+        shell: "bash -el {0}"
         run: |
           set -euo pipefail
           conda install -y pytorch torchvision
+          echo "VIRTUAL_ENV=$CONDA_PREFIX" >> "$GITHUB_ENV"
+          echo "PATH=$CONDA_PREFIX/bin:$PATH" >> "$GITHUB_ENV"
       - name: Install dependencies
-        shell: ${{ matrix.shell }}
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip setuptools wheel
@@ -102,10 +100,8 @@ jobs:
             python -m pip install -r requirements.txt -r requirements-ai.txt -r macos-packaging/requirements-build.txt
           fi
       - name: Build app and DMG
-        shell: ${{ matrix.shell }}
         run: bash macos-packaging/build_macos.sh
       - name: Smoke-test frozen app
-        shell: ${{ matrix.shell }}
         env:
           QT_QPA_PLATFORM: offscreen
           TRACKLAB_SKIP_UPDATE_CHECK: "1"
@@ -117,7 +113,6 @@ jobs:
           "$APP" --smoke
           python -m unittest tests.ai.integration.test_packaged_app -v
       - name: Stage release files
-        shell: ${{ matrix.shell }}
         run: cp dist/update.json "dist/update-${{ matrix.arch }}.json"
       - name: Upload DMG and patch
         uses: actions/upload-artifact@v4
