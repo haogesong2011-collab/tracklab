@@ -29,6 +29,12 @@ class _FakeTapir:
 
 
 class BootsTapirTrackerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            self.skipTest("torch not installed")
+
     def test_surface_point_keeps_query_identity_and_uncertainty(self) -> None:
         entry = next(
             item for item in load_manifest().entries if item.clip_id == "track_ball_normal"

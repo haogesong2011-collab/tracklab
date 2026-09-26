@@ -779,7 +779,10 @@ class InferenceHeadroomTests(unittest.TestCase):
         self.assertEqual(os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK"), "1")
 
     def test_bfloat16_mask_memory_becomes_float32(self) -> None:
-        import torch
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch not installed")
 
         from ai.sam_runtime import _BFloat16AsFloat32, install_float32_mask_memory
 
@@ -824,7 +827,10 @@ class InferenceHeadroomTests(unittest.TestCase):
         self.assertTrue(mps_supports_bfloat16(_Idle()))
 
     def test_real_rope_matches_complex_on_cpu(self) -> None:
-        import torch
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch not installed")
         from sam2.modeling.position_encoding import apply_rotary_enc, compute_axial_cis
 
         from ai.sam_runtime import apply_rotary_enc_real, compute_axial_cis_real
