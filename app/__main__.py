@@ -46,6 +46,18 @@ def _smoke_check(window) -> int:  # noqa: ANN001
         if is_frozen() and (Sam2Tracker is None or not isinstance(precise, Sam2Tracker)):
             print("SMOKE FAIL: precise mode should load SAM Small", file=sys.stderr)
             return 1
+        if is_frozen():
+            try:
+                from sam2.sam2_video_predictor import SAM2VideoPredictor
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"SMOKE FAIL: cannot import SAM2VideoPredictor: {exc}",
+                    file=sys.stderr,
+                )
+                return 1
+            if SAM2VideoPredictor is None:
+                print("SMOKE FAIL: SAM2VideoPredictor missing", file=sys.stderr)
+                return 1
     state = planar_state(
         [Point2D(0, 0), Point2D(400, 0), Point2D(400, 300), Point2D(0, 300)],
         width_m=1.0,
@@ -85,7 +97,27 @@ def _smoke_check(window) -> int:  # noqa: ANN001
     return 0
 
 
+_VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".mpg", ".mpeg"}
+
+
+def _opened_as_document() -> bool:
+    """macOS relaunches a registered video app with the file path. Do not open a second window."""
+    if not getattr(sys, "frozen", False):
+        return False
+    for arg in sys.argv[1:]:
+        if arg.startswith("-"):
+            continue
+        if Path(arg).suffix.lower() in _VIDEO_SUFFIXES:
+            return True
+    return False
+
+
 def main() -> None:
+    from ai.sam_runtime import reserve_system_headroom
+
+    reserve_system_headroom()
+    if _opened_as_document():
+        raise SystemExit(0)
     if "--version" in sys.argv:
         raise SystemExit(_print_version())
     from PySide6.QtWidgets import QApplication
@@ -93,6 +125,7 @@ def main() -> None:
     from app import __version__
     from app.main_window import MainWindow
     from app.paths import style_path
+    from app.theme import stylesheet, sync_system
 
     app = QApplication(sys.argv)
     app.setApplicationName("TrackLab")
@@ -100,10 +133,11 @@ def main() -> None:
     app.setOrganizationDomain("tracklab.app")
     app.setApplicationVersion(__version__)
     app.setStyle("Fusion")
+    sync_system()
     window = MainWindow()
     sheet = style_path()
     if sheet.is_file() and not window.styleSheet():
-        window.setStyleSheet(sheet.read_text(encoding="utf-8"))
+        window.setStyleSheet(stylesheet())
     if "--smoke" in sys.argv:
         code = _smoke_check(window)
         window.close()

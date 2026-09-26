@@ -27,10 +27,11 @@ rm -rf "$APP" "$ROOT/dist/TrackLab" "$ROOT/build/pyinstaller"
 
 "$PYTHON" macos-packaging/make_icon.py
 "$PYTHON" - <<'PY'
-from ai.model_manager import DEFAULT_SPEC, ensure_checkpoint
+from ai.model_manager import BUNDLED_SPECS, ensure_checkpoint
 
-ensure_checkpoint(DEFAULT_SPEC, download=True)
-print("sam checkpoint ready")
+for spec in BUNDLED_SPECS:
+    ensure_checkpoint(spec, download=True)
+    print(spec.filename, "ready")
 PY
 "$PYTHON" -m PyInstaller \
   --noconfirm \
@@ -56,10 +57,10 @@ if not any(name == "torch" or name.startswith("libtorch") for name in names):
 if "sam2" not in names and not any("sam2" in name for name in names):
     print("precise bundle missing sam2")
     sys.exit(1)
-ckpt = list(root.rglob("sam2.1_hiera_tiny.pt"))
-if not ckpt:
-    print("precise bundle missing SAM checkpoint")
-    sys.exit(1)
+for name in ("sam2.1_hiera_tiny.pt", "sam2.1_hiera_small.pt"):
+    if not list(root.rglob(name)):
+        print(f"bundle missing {name}")
+        sys.exit(1)
 if not list(root.rglob("libavcodec*.dylib")):
     print("bundle missing PyAV ffmpeg: video decoding would fail")
     sys.exit(1)
@@ -123,6 +124,14 @@ hdiutil create \
 # The COLLECT onedir is a byte-for-byte duplicate of the bundle (~1.2 GB each).
 chmod -R u+w "$ROOT/dist/TrackLab" "$ROOT/build/pyinstaller" 2>/dev/null || true
 rm -rf "$ROOT/dist/TrackLab" "$ROOT/build/pyinstaller"
+
+MANIFEST="$ROOT/dist/update.json"
+"$PYTHON" macos-packaging/write_update_json.py "$MANIFEST"
+"$PYTHON" macos-packaging/make_patch.py \
+  --app "$APP" \
+  --arch "$ARCH" \
+  --zip "$ROOT/dist/TrackLab-${ARCH}-patch.zip" \
+  --manifest "$MANIFEST"
 
 echo "built $APP ($(du -sh "$APP" | cut -f1))"
 echo "built $DMG ($(du -sh "$DMG" | cut -f1))"

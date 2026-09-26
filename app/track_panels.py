@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from html import escape
+
+from PySide6.QtCore import Qt, QMimeData, Signal
+from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -12,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QProgressBar,
     QPushButton,
     QTableWidget,
@@ -21,8 +24,8 @@ from PySide6.QtWidgets import (
 )
 
 from ai.contracts import TrackLayer, TrackResult
-from ai.kinematics import is_low_confidence, quality_tooltip, series_for_result
-from app.data_views import VX_NAME, VY_NAME, speed_axis_label
+from ai.kinematics import accel_unit_for, is_low_confidence, quality_tooltip, series_for_result
+from app.data_views import AX_NAME, AY_NAME, VX_NAME, VY_NAME, speed_axis_label
 from engine.video_index import VideoInfo
 
 
@@ -67,10 +70,7 @@ class TrackListPanel(QWidget):
         self._shake_box = QCheckBox("背景补偿")
         self._shake_box.setObjectName("panelCheck")
         self._shake_box.setChecked(True)
-        self._shake_box.setToolTip(
-            "开启后，数据表、分图和导出使用补偿后的坐标。"
-            "若补偿会打乱现有数据则自动回退到原始测量，无法用开关绕过安全门控。"
-        )
+        self._shake_box.setToolTip("减镜头晃。不稳时自动用原来的坐标。")
         self._shake_box.toggled.connect(self.shake_toggled.emit)
 
         self._progress = QProgressBar()
@@ -78,7 +78,7 @@ class TrackListPanel(QWidget):
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
         self._progress.setTextVisible(True)
-        self._status = QLabel("Control 拖动框选目标，Shift+Control 点击加点")
+        self._status = QLabel("Control 拖动框选目标，Shift+左键点击加点")
         self._status.setObjectName("panelHint")
         self._status.setWordWrap(True)
 
@@ -119,8 +119,13 @@ class TrackListPanel(QWidget):
             item.setForeground(QColor(layer.color))
             item.setText(layer.name)
             bits: list[str] = []
+            bits.append(
+                "指定表面点"
+                if layer.tracking_target.value == "surface_point"
+                else "物体中心"
+            )
             if layer.result:
-                n = sum(1 for p in layer.result.points if p.visible)
+                n = sum(1 for p in layer.result.points if p.usable_for_measurement())
                 bits.append(f"{n} 个点")
             if layer.status == "running":
                 bits.append("跟踪中")
@@ -177,35 +182,53 @@ class TrackListPanel(QWidget):
 
 class TrackDataPanel(QWidget):
     frame_activated = Signal(int)
+    export_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("trackDataPanel")
         self.setMinimumHeight(140)
-        self._table = QTableWidget(0, 8)
+        self._table = QTableWidget(0, 10)
         self._table.setObjectName("trackTable")
         self._position_unit = "px"
         self._speed_unit = "px/s"
+        self._accel_unit = "px/s²"
         self._table.setHorizontalHeaderLabels(self._header_labels())
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setWordWrap(False)
         self._table.setTextElideMode(Qt.TextElideMode.ElideNone)
         self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._show_menu)
         header = self._table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setMinimumSectionSize(40)
         header.setStretchLastSection(False)
         self._table.cellClicked.connect(self._on_cell)
+        copy = QShortcut(QKeySequence.StandardKey.Copy, self._table)
+        copy.setContext(Qt.ShortcutContext.WidgetShortcut)
+        copy.activated.connect(self.copy_selection)
+        export = QPushButton("导出 CSV")
+        export.setObjectName("dataExportButton")
+        export.setToolTip("把当前轨迹导出成 CSV，用 Numbers 或 Excel 打开")
+        export.clicked.connect(self.export_requested.emit)
+        bar = QHBoxLayout()
+        bar.setContentsMargins(0, 0, 0, 0)
+        bar.addStretch()
+        bar.addWidget(export)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 8)
         layout.setSpacing(4)
+        layout.addLayout(bar)
         layout.addWidget(self._table)
 
     def _header_labels(self) -> list[str]:
         unit = self._position_unit
         speed = self._speed_unit
+        accel = self._accel_unit
         return [
             "帧",
             "时间 (s)",
@@ -213,15 +236,28 @@ class TrackDataPanel(QWidget):
             f"y ({unit})",
             f"{VX_NAME} ({speed_axis_label(speed)})",
             f"{VY_NAME} ({speed_axis_label(speed)})",
+            f"{AX_NAME} ({accel})",
+            f"{AY_NAME} ({accel})",
             "可见",
-            "置信度",
+            "追踪质量",
         ]
 
-    def set_units(self, position_unit: str, speed_unit: str) -> None:
-        if position_unit == self._position_unit and speed_unit == self._speed_unit:
+    def set_units(
+        self,
+        position_unit: str,
+        speed_unit: str,
+        accel_unit: str | None = None,
+    ) -> None:
+        accel = accel_unit or accel_unit_for(speed_unit)
+        if (
+            position_unit == self._position_unit
+            and speed_unit == self._speed_unit
+            and accel == self._accel_unit
+        ):
             return
         self._position_unit = position_unit
         self._speed_unit = speed_unit
+        self._accel_unit = accel
         self._table.setHorizontalHeaderLabels(self._header_labels())
 
     def set_layer(
@@ -242,7 +278,11 @@ class TrackDataPanel(QWidget):
 
     def set_samples(self, samples) -> None:  # noqa: ANN001
         if samples:
-            self.set_units(samples[0].position_unit, samples[0].speed_unit)
+            self.set_units(
+                samples[0].position_unit,
+                samples[0].speed_unit,
+                samples[0].accel_unit,
+            )
         else:
             self._table.setHorizontalHeaderLabels(self._header_labels())
         self._table.setRowCount(len(samples))
@@ -255,6 +295,8 @@ class TrackDataPanel(QWidget):
                 "" if sample.y is None else f"{sample.y:.2f}",
                 "" if sample.vx is None else f"{sample.vx:.2f}",
                 "" if sample.vy is None else f"{sample.vy:.2f}",
+                "" if sample.ax is None else f"{sample.ax:.2f}",
+                "" if sample.ay is None else f"{sample.ay:.2f}",
                 "是" if sample.visible else "否",
                 f"{sample.confidence:.2f}",
             ]
@@ -264,16 +306,45 @@ class TrackDataPanel(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, sample.frame)
                 if low:
                     item.setForeground(warn)
-                    tip = quality_tooltip(sample)
-                    if "已拒收" in tip:
-                        item.setToolTip(tip)
-                    else:
-                        item.setToolTip(f"低可信度：{sample.confidence:.2f}")
+                    item.setToolTip(quality_tooltip(sample))
                 self._table.setItem(row, col, item)
         self._table.resizeColumnsToContents()
         for col in range(self._table.columnCount()):
             width = self._table.columnWidth(col)
             self._table.setColumnWidth(col, min(max(width + 8, 48), 128))
+
+    def copy_selection(self) -> None:
+        rows = sorted({index.row() for index in self._table.selectedIndexes()})
+        if not rows:
+            return
+        headers = [
+            self._table.horizontalHeaderItem(col).text()
+            for col in range(self._table.columnCount())
+        ]
+        lines = ["\t".join(headers)]
+        html_rows = [
+            "<tr>" + "".join(f"<th>{escape(text)}</th>" for text in headers) + "</tr>"
+        ]
+        for row in rows:
+            cells = []
+            for col in range(self._table.columnCount()):
+                item = self._table.item(row, col)
+                cells.append("" if item is None else item.text())
+            lines.append("\t".join(cells))
+            html_rows.append(
+                "<tr>" + "".join(f"<td>{escape(text)}</td>" for text in cells) + "</tr>"
+            )
+        payload = QMimeData()
+        payload.setText("\n".join(lines))
+        payload.setHtml("<table>" + "".join(html_rows) + "</table>")
+        QGuiApplication.clipboard().setMimeData(payload)
+
+    def _show_menu(self, pos) -> None:  # noqa: ANN001
+        menu = QMenu(self._table)
+        menu.addAction("复制", self.copy_selection)
+        menu.addAction("全选", self._table.selectAll)
+        menu.addAction("导出 CSV…", self.export_requested.emit)
+        menu.exec(self._table.viewport().mapToGlobal(pos))
 
     def highlight_frame(self, frame: int) -> None:
         for row in range(self._table.rowCount()):

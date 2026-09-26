@@ -23,11 +23,14 @@ from app.update_checker import (  # noqa: E402
     check_for_update,
     dmg_filename,
     evaluate_release,
+    info_from_manifest,
     is_newer,
+    parse_patch_table,
     parse_release_assets,
     parse_sha256sums,
     parse_update_manifest,
     parse_version,
+    release_download_url,
     safe_release_url,
     should_auto_check,
     update_checks_allowed,
@@ -122,7 +125,8 @@ class UpdateCheckerTests(unittest.TestCase):
 
     def test_fetch_status_mapping_without_network(self) -> None:
         def ok(url, headers, timeout):
-            self.assertEqual(url, GITHUB_API_LATEST)
+            if url != GITHUB_API_LATEST:
+                return 404, {}, b""
             self.assertIn("TrackLab/", headers["User-Agent"])
             self.assertEqual(timeout, 8.0)
             body = json.dumps(_payload()).encode()
@@ -328,10 +332,75 @@ class UpdateCheckerTests(unittest.TestCase):
         self.assertFalse(fallback.critical)
         self.assertEqual(fallback.minimum_version, "")
 
+    def test_web_page_finds_update_when_api_is_limited(self) -> None:
+        manifest = {
+            "version": "0.3.5",
+            "minimum_version": "0.3.0",
+            "critical": False,
+            "notes": "小补丁",
+            "assets": ["TrackLab-arm64.dmg", "SHA256SUMS.txt"],
+            "patch": {
+                "arm64": {
+                    "asset": "TrackLab-arm64-patch.zip",
+                    "runtime": "ab" * 32,
+                    "sha256": "cd" * 32,
+                    "size": 20000000,
+                }
+            },
+        }
+        page = "https://github.com/haogesong2011-collab/tracklab/releases/tag/v0.3.5"
+        manifest_url = (
+            "https://github.com/haogesong2011-collab/tracklab/"
+            "releases/download/v0.3.5/update.json"
+        )
+
+        def transport(url, headers, timeout):
+            del headers, timeout
+            if url == GITHUB_RELEASES_PAGE:
+                return 200, {"X-Tracklab-Final-Url": page}, b""
+            if url == manifest_url:
+                return 200, {}, json.dumps(manifest).encode()
+            if url == GITHUB_API_LATEST:
+                return 403, {}, b"rate limit"
+            raise AssertionError(url)
+
+        info = check_for_update("0.3.4", transport=transport)
+        self.assertEqual(info.status, UpdateStatus.AVAILABLE)
+        self.assertEqual(info.latest, "v0.3.5")
+        self.assertEqual(info.notes, "小补丁")
+        spec = info.patch_for("arm64")
+        self.assertIsNotNone(spec)
+        assert spec is not None
+        self.assertEqual(spec.asset, "TrackLab-arm64-patch.zip")
+        self.assertEqual(spec.size, 20000000)
+        self.assertTrue(info.installer_for("arm64").url.startswith("https://github.com/"))
+
+    def test_manifest_download_urls_stay_on_github(self) -> None:
+        self.assertIsNone(release_download_url("v0.3.5", "../evil"))
+        self.assertIsNone(release_download_url("nope", "update.json"))
+        url = release_download_url("v0.3.5", "update.json")
+        self.assertEqual(
+            url,
+            "https://github.com/haogesong2011-collab/tracklab/releases/download/v0.3.5/update.json",
+        )
+        info = info_from_manifest(
+            {
+                "version": "0.3.5",
+                "notes": "说明",
+                "assets": ["TrackLab-arm64.dmg"],
+                "patch": {"arm64": {"asset": "x", "runtime": "a", "sha256": "b"}},
+            },
+            "0.3.4",
+        )
+        self.assertIsNotNone(info)
+        assert info is not None
+        self.assertEqual(info.patches, ())
+        self.assertEqual(parse_patch_table({"nope": {}}) , ())
+
     def test_shortcuts_do_not_describe_shift_click_as_negative(self) -> None:
         text = (ROOT / "app" / "main_window.py").read_text(encoding="utf-8")
         self.assertNotIn("Shift+点击：负点", text)
-        self.assertIn("Shift+Control 点击：加点", text)
+        self.assertIn("Shift+左键（或 Shift+Control）点击：加点", text)
 
 
 if __name__ == "__main__":

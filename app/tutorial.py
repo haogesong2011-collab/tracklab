@@ -34,6 +34,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.theme import qcolor as theme_qcolor
+
 SETTINGS_TUTORIAL_SEEN = "tutorial/seen"
 HOLE_PAD = 8
 HOLE_RADIUS = 8
@@ -47,8 +49,10 @@ MASK = QColor(77, 163, 255, 70)
 MASK_EDGE = QColor("#4da3ff")
 TRAIL = QColor("#80cbc4")
 WARN = QColor("#f0c14b")
-STAGE_BG = QColor("#1a1c20")
-STAGE_FLOOR = QColor("#24262c")
+
+
+def _c(token: str) -> QColor:
+    return theme_qcolor(token)
 STAGE_W = 384
 STAGE_H = 216
 DEMO_CYCLE_MS = 3000
@@ -175,118 +179,100 @@ def default_steps(window) -> list[TourStep]:  # noqa: ANN001
     return [
         TourStep(
             "导入视频",
-            "TrackLab 从实验录像里取出位移和速度。把 mp4 / mov 拖进这块区域，或点它选文件。"
-            "打开只建帧索引，不会先转码。下面是动画示范，也可以自己拖入。翻页请点下一步。",
+            "把 mp4 或 mov 拖进这块区域，或点它选文件。看完动画再点下一步。",
             drop_target,
             demo=DemoKind.DROP,
         ),
         TourStep(
             "打开视频",
-            "也可以点顶栏这个打开按钮。文件菜单同样能打开视频，或打开上次保存的项目。"
-            "打开后教程不会自动翻页，看完动画再点下一步。",
+            "也可以点这个按钮打开视频，或打开上次保存的项目。",
             tool("open"),
             demo=DemoKind.OPEN,
         ),
         TourStep(
             "新建轨迹",
-            "点轨迹按钮打开管理器，再点新建。一条视频可以跟多个物体，每条轨迹单独框、单独跟。"
-            "先建好轨迹，再在画面上指定目标。",
+            "点这里打开轨迹，再点新建。一条视频可以跟多个物体。",
             track_button,
             prepare=ensure_tracks,
             demo=DemoKind.NEW_TRACK,
         ),
         TourStep(
             "框选目标",
-            "按住 Control 拖出方框（macOS 也可用右键拖）。这个框是给 SAM 2 的目标提示："
-            "告诉模型「跟这个物体」，不是搜索范围，也不会裁剪画面，所以框大框小几乎不影响速度。"
-            "框要紧贴目标。想更快，缩小进度条上的分析区间，或改用快速模式。",
+            "按住 Control 拖出方框。框是告诉软件跟哪个物体，不是搜索范围。跟踪后框会跟着走。",
             tool("track"),
             demo=DemoKind.BOX,
         ),
         TourStep(
             "加提示点",
-            "Shift+Control 点击可以在目标上加点，适合框不好画的小物体。"
-            "当前界面只有正点（「就是这个」），没有负点入口。框和点可以一起用，然后按 T 跟踪。",
+            "Shift+Control 点击，在物体上加一个正点。框和点可以一起用。",
             tool("track"),
             demo=DemoKind.SEED_POINT,
         ),
         TourStep(
             "按 T 跟踪",
-            "按 T 或点「SAM 自动跟踪」。推理在独立线程跑，画面还能拖进度条。"
-            "再按一次 T 取消。状态栏会显示本次跟踪的帧范围。下面动画是小球抛出后掩膜跟着走。",
+            "按 T 开始跟踪，再按一次取消。跟踪时还可以拖进度条。",
             tool("track"),
             demo=DemoKind.TRACK_RUN,
         ),
         TourStep(
             "快速 / 精准",
-            "轨迹菜单里选：快速预览用 Tiny，隔帧推理再插值，适合先看跟没跟对；"
-            "精准分析用 Small，逐帧更稳，适合最终数据。两条抛物线：上面点稀，下面点密。",
+            "快速用 Tiny，先看跟没跟对。精准用 Small，逐帧更稳。",
             analysis_menu,
             demo=DemoKind.FAST_PRECISE,
         ),
         TourStep(
             "跟丢了怎么修",
-            "某一帧偏了，点那一帧画面上的正确位置。再按 T，会从这一帧往后重跟，前面的点保留。"
-            "黄色是低可信，不要直接拿去算。",
+            "拖到偏了的那一帧，Shift+Control 点物体现在的位置，只改当前帧。再按 T，从这里往后重跟。",
             tool("track"),
             demo=DemoKind.FIX_POINT,
         ),
         TourStep(
             "跟踪范围与背景补偿",
-            "进度条上方两个三角是分析区间，I / O 把它们设到当前帧。跟踪只跑到结束三角。"
-            "背景补偿用来减镜头晃，质量不够会自动保持关闭，不要强开。",
+            "进度条上方两个三角是跟踪范围，I / O 设到当前帧。背景补偿用来减镜头晃，不稳会自动关掉。",
             transport,
             demo=DemoKind.RANGE,
         ),
         TourStep(
             "标定尺",
-            "点尺子，在画面上拖出一段已知长度，例如直尺或桌边。只画一把尺时，整张图用同一个比例。"
-            "近、远各画一把，用来补偿透视。填真实长度后，坐标从像素变成米。没有标定，分图和表格仍是像素。",
+            "拖出一段已知长度。近、远各一把可以补偿透视。标定后单位从像素变成米。",
             tool("ruler"),
             demo=DemoKind.RULER,
         ),
         TourStep(
             "坐标系",
-            "点坐标轴工具，把原点拖到参考点，例如抛出点或桌面。X、Y 方向可以转动。"
-            "原点和标定一起决定位移、速度的正方向。",
+            "把原点拖到参考点，例如抛出点。X、Y 可以转动，它们决定正方向。",
             tool("axis"),
             demo=DemoKind.AXIS,
         ),
         TourStep(
             "分图",
-            "分图像 x(t)、y(t)、速度这样随时间变化。按住曲线左右拖，当前帧会跟着走。滚轮缩放。"
-            "头部可选速度算法（稳健拟合 / Tracker 差分）、窗口和拟合。点图上的点也会跳帧。",
+            "横轴是时间。按住拖可以换当前帧，滚轮缩放。窗口只平滑速度和加速度，不改位置。",
             chart_dock,
             prepare=ensure_chart,
             demo=DemoKind.CHART,
         ),
         TourStep(
             "数据表",
-            "每一帧的 t、x、y 列在这里。点某一行跳到那一帧。黄色表示这一帧跟踪不可信。"
-            "文件菜单可导出 CSV 或 JSON。",
+            "一行是一帧。点一行就跳过去。黄色是这一帧不太可信。可以复制，也可以导出 CSV。",
             data_dock,
             prepare=ensure_data,
             demo=DemoKind.TABLE,
         ),
         TourStep(
             "当前读数",
-            "第二栏是当前轨迹和这一帧的 t、x、y。标定后单位会从 px 变成 m。"
-            "左右三角跳到上一个或下一个有效点。",
+            "这里是当前这一帧的 t、x、y。左右三角跳到上一个或下一个点。",
             view_bar,
             demo=DemoKind.READOUT,
         ),
         TourStep(
             "AI 助手",
-            "助手根据轨迹和标定判断实验类型，再用 DeepSeek 讲解公式。"
-            "首次使用请到编辑菜单填写密钥。不会上传原始视频，只发送结构化数据。",
+            "AI 助手暂未开放。",
             tool("ai"),
             demo=DemoKind.ASSISTANT,
         ),
         TourStep(
             "播放与保存",
-            "空格播放或暂停。左右方向键按底栏步长逐帧。分析区间外的进度会被拉回。"
-            "右下角循环按钮只决定播到终点是回绕还是停住。分析完点保存，下次打开项目时轨迹和标定都在。"
-            "帮助菜单的「快速开始」可以再看一遍。",
+            "空格播放或暂停，左右键逐帧。点保存后，下次打开轨迹和标定还在。",
             transport,
             demo=DemoKind.PLAY,
         ),
@@ -387,7 +373,7 @@ class TutorialStage(QWidget):
         del event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), STAGE_BG)
+        painter.fillRect(self.rect(), _c("stage"))
         painters = {
             DemoKind.DROP: self._paint_drop,
             DemoKind.OPEN: self._paint_open,
@@ -423,8 +409,8 @@ class TutorialStage(QWidget):
         return font
 
     def _scene(self, painter: QPainter) -> None:
-        painter.fillRect(self._rect(0.0, 0.76, 1.0, 0.24), STAGE_FLOOR)
-        painter.setPen(QPen(QColor("#3a3d44"), 1))
+        painter.fillRect(self._rect(0.0, 0.76, 1.0, 0.24), _c("stage_floor"))
+        painter.setPen(QPen(_c("stage_line"), 1))
         painter.drawLine(self._pt(0.0, 0.76), self._pt(1.0, 0.76))
 
     def _ball(self, painter: QPainter, x: float, y: float, r: float = 0.045) -> None:
@@ -465,24 +451,30 @@ class TutorialStage(QWidget):
 
     def _label(self, painter: QPainter, text: str, x: float, y: float, color: QColor | None = None) -> None:
         painter.setFont(self._font(11, True))
-        painter.setPen(color or QColor("#e6e6e6"))
+        painter.setPen(color or _c("stage_ink"))
         painter.drawText(self._pt(x, y), text)
 
     def _chip(self, painter: QPainter, x: float, y: float, fade: float) -> None:
         if fade <= 0.02:
             return
         rect = self._rect(x, y, 0.16, 0.16)
-        painter.setBrush(QColor(45, 45, 45, int(230 * fade)))
-        painter.setPen(QPen(QColor(90, 90, 90, int(240 * fade)), 1))
+        chip = _c("toast")
+        chip.setAlpha(int(230 * fade))
+        edge = _c("border_line")
+        edge.setAlpha(int(240 * fade))
+        ink = _c("stage_ink")
+        ink.setAlpha(int(255 * fade))
+        painter.setBrush(chip)
+        painter.setPen(QPen(edge, 1))
         painter.drawRoundedRect(rect, 6, 6)
         painter.setFont(self._font(12, True))
-        painter.setPen(QColor(230, 230, 230, int(255 * fade)))
+        painter.setPen(ink)
         painter.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), "mp4")
 
     def _timeline(self, painter: QPainter, start: float, end: float, play: float) -> None:
         groove = self._rect(0.08, 0.86, 0.84, 0.04)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#3a3a3a"))
+        painter.setBrush(_c("border"))
         painter.drawRoundedRect(groove, 2, 2)
         inner = QRectF(
             groove.left() + groove.width() * start,
@@ -499,21 +491,21 @@ class TutorialStage(QWidget):
             tri.lineTo(x + 5, groove.top() - 10)
             tri.lineTo(x, groove.top() - 2)
             tri.closeSubpath()
-            painter.fillPath(tri, QColor("#c4c4c4"))
+            painter.fillPath(tri, _c("marker"))
         px = groove.left() + groove.width() * play
         head = QPainterPath()
         head.moveTo(px - 5, groove.bottom() + 10)
         head.lineTo(px + 5, groove.bottom() + 10)
         head.lineTo(px, groove.bottom() + 2)
         head.closeSubpath()
-        painter.fillPath(head, QColor("#e2e2e2"))
+        painter.fillPath(head, _c("playhead"))
 
     def _paint_drop(self, painter: QPainter) -> None:
         t = self._phase
         box = self._rect(0.18, 0.22, 0.64, 0.52)
         hover = t < 0.78
-        painter.setBrush(QColor("#2a3340") if hover else QColor("#232323"))
-        pen = QPen(HIGHLIGHT if hover else QColor("#5a5a5a"), 1.6)
+        painter.setBrush(_c("stage_chip") if hover else _c("panel"))
+        pen = QPen(HIGHLIGHT if hover else _c("groove"), 1.6)
         pen.setStyle(Qt.PenStyle.DashLine)
         painter.setPen(pen)
         painter.drawRoundedRect(box, 10, 10)
@@ -527,8 +519,8 @@ class TutorialStage(QWidget):
         t = self._phase
         btn = self._rect(0.12, 0.12, 0.22, 0.16)
         pressed = 0.42 <= t <= 0.62
-        painter.setBrush(QColor("#191919") if pressed else QColor("#383838"))
-        painter.setPen(QPen(QColor("#4da3ff" if pressed else "#5a5a5a"), 1))
+        painter.setBrush(_c("bg_pressed") if pressed else _c("hover_tool"))
+        painter.setPen(QPen(HIGHLIGHT if pressed else _c("groove"), 1))
         painter.drawRoundedRect(btn, 8, 8)
         self._label(painter, "打开", 0.17, 0.23)
         appear = _smooth((t - 0.55) / 0.25) if t > 0.55 else 0.0
@@ -542,8 +534,8 @@ class TutorialStage(QWidget):
     def _paint_new_track(self, painter: QPainter) -> None:
         t = self._phase
         panel = self._rect(0.08, 0.10, 0.84, 0.78)
-        painter.setBrush(QColor("#232323"))
-        painter.setPen(QPen(QColor("#3a3a3a"), 1))
+        painter.setBrush(_c("panel"))
+        painter.setPen(QPen(_c("border"), 1))
         painter.drawRoundedRect(panel, 8, 8)
         self._label(painter, "轨迹", 0.14, 0.22)
         btn = self._rect(0.62, 0.14, 0.22, 0.12)
@@ -551,14 +543,14 @@ class TutorialStage(QWidget):
         painter.setPen(QPen(HIGHLIGHT, 1))
         painter.drawRoundedRect(btn, 4, 4)
         painter.setFont(self._font(11))
-        painter.setPen(QColor("#f0f0f0"))
+        painter.setPen(_c("text_strong"))
         painter.drawText(btn, int(Qt.AlignmentFlag.AlignCenter), "新建")
         if t > 0.45:
             row = self._rect(0.14, 0.36, 0.72, 0.18)
-            painter.setBrush(QColor("#2d2d2d"))
-            painter.setPen(QPen(QColor("#4da3ff"), 1))
+            painter.setBrush(_c("input"))
+            painter.setPen(QPen(HIGHLIGHT, 1))
             painter.drawRoundedRect(row, 4, 4)
-            painter.setPen(QColor("#80cbc4"))
+            painter.setPen(TRAIL)
             painter.drawText(self._pt(0.18, 0.48), "轨迹 1")
         cx = _mix(0.18, 0.72, _smooth(min(t / 0.40, 1.0)))
         cy = _mix(0.70, 0.20, _smooth(min(t / 0.40, 1.0)))
@@ -576,7 +568,7 @@ class TutorialStage(QWidget):
         painter.setBrush(QColor(77, 163, 255, 35))
         painter.setPen(QPen(HIGHLIGHT, 1.6))
         painter.drawRect(self._rect(left, top, w, h))
-        self._label(painter, "目标提示，不是范围", 0.28, 0.16, QColor("#b8d4ff"))
+        self._label(painter, "目标提示，不是范围", 0.28, 0.16, _c("stage_accent_text"))
         self._cursor(
             painter,
             left + w,
@@ -592,7 +584,7 @@ class TutorialStage(QWidget):
             painter.setBrush(QColor("#4da3ff"))
             painter.setPen(QPen(QColor("#ffffff"), 1.5))
             painter.drawEllipse(self._pt(0.48, 0.62), 6, 6)
-        self._label(painter, "Shift+Control 正点", 0.30, 0.16, QColor("#b8d4ff"))
+        self._label(painter, "Shift+Control 正点", 0.30, 0.16, _c("stage_accent_text"))
         cx = _mix(0.20, 0.48, _smooth(min(t / 0.40, 1.0)))
         cy = _mix(0.22, 0.62, _smooth(min(t / 0.40, 1.0)))
         self._cursor(painter, cx, cy, 1.0 if 0.40 <= t <= 0.58 else 0.0)
@@ -615,10 +607,10 @@ class TutorialStage(QWidget):
         self._label(painter, "按 T 跟踪", 0.08, 0.10)
 
     def _paint_fast_precise(self, painter: QPainter) -> None:
-        painter.fillRect(self._rect(0.0, 0.0, 1.0, 0.5), STAGE_BG)
-        painter.fillRect(self._rect(0.0, 0.5, 1.0, 0.5), QColor("#16181c"))
-        self._label(painter, "Tiny 隔帧", 0.06, 0.10, QColor("#8f8f8f"))
-        self._label(painter, "Small 逐帧", 0.06, 0.60, QColor("#8f8f8f"))
+        painter.fillRect(self._rect(0.0, 0.0, 1.0, 0.5), _c("stage"))
+        painter.fillRect(self._rect(0.0, 0.5, 1.0, 0.5), _c("stage_deep"))
+        self._label(painter, "Tiny 隔帧", 0.06, 0.10, _c("text_muted"))
+        self._label(painter, "Small 逐帧", 0.06, 0.60, _c("text_muted"))
         t = _smooth(self._phase)
         for row, step, dash in ((0.0, 2, True), (0.5, 1, False)):
             path = QPainterPath()
@@ -667,7 +659,7 @@ class TutorialStage(QWidget):
             painter.setPen(QPen(QColor("#ffffff"), 1))
             painter.drawEllipse(self._pt(cx, cy), 6, 6)
             self._cursor(painter, cx, cy, 1.0)
-        self._label(painter, "点偏了的帧，再按 T", 0.08, 0.10, WARN)
+        self._label(painter, "Shift+Control 点当前帧", 0.08, 0.10, WARN)
 
     def _paint_range(self, painter: QPainter) -> None:
         t = self._phase
@@ -689,14 +681,14 @@ class TutorialStage(QWidget):
         a = self._pt(0.18, 0.70)
         grow = _smooth(_clamp01((t - 0.2) / 0.45))
         b = self._pt(_mix(0.18, 0.72, grow), 0.70)
-        painter.setPen(QPen(QColor("#80cbc4"), 2.4))
+        painter.setPen(QPen(_c("teal"), 2.4))
         painter.drawLine(a, b)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#80cbc4"))
+        painter.setBrush(_c("teal"))
         painter.drawEllipse(a, 4, 4)
         painter.drawEllipse(b, 4, 4)
         if grow > 0.85:
-            self._label(painter, "1.00 m", 0.40, 0.58, QColor("#80cbc4"))
+            self._label(painter, "1.00 m", 0.40, 0.58, _c("teal"))
         self._cursor(painter, _mix(0.18, 0.72, grow), 0.70, 1.0 if t > 0.2 else 0.0)
 
     def _paint_axis(self, painter: QPainter) -> None:
@@ -711,7 +703,7 @@ class TutorialStage(QWidget):
         y2 = oy + length * math.sin(angle)
         yx = ox + length * 0.7 * math.cos(angle - math.pi / 2)
         yy = oy + length * 0.7 * math.sin(angle - math.pi / 2)
-        painter.setPen(QPen(QColor("#e6e6e6"), 2))
+        painter.setPen(QPen(_c("stage_ink"), 2))
         painter.drawLine(self._pt(ox, oy), self._pt(x2, y2))
         painter.drawLine(self._pt(ox, oy), self._pt(yx, yy))
         painter.setBrush(HIGHLIGHT)
@@ -729,10 +721,10 @@ class TutorialStage(QWidget):
     def _paint_chart(self, painter: QPainter) -> None:
         t = _smooth(self._phase)
         frame = self._rect(0.08, 0.10, 0.84, 0.78)
-        painter.setBrush(QColor("#232323"))
-        painter.setPen(QPen(QColor("#3a3a3a"), 1))
+        painter.setBrush(_c("panel"))
+        painter.setPen(QPen(_c("border"), 1))
         painter.drawRoundedRect(frame, 6, 6)
-        painter.setPen(QPen(QColor("#5a5a5a"), 1))
+        painter.setPen(QPen(_c("groove"), 1))
         painter.drawLine(self._pt(0.14, 0.78), self._pt(0.88, 0.78))
         painter.drawLine(self._pt(0.14, 0.18), self._pt(0.14, 0.78))
         path = QPainterPath()
@@ -754,7 +746,7 @@ class TutorialStage(QWidget):
         painter.drawPath(path)
         cx = 0.14 + 0.70 * t
         cy = 0.70 - 0.42 * math.sin(t * math.pi)
-        painter.setPen(QPen(QColor("#f0f0f0"), 1, Qt.PenStyle.DashLine))
+        painter.setPen(QPen(_c("text_strong"), 1, Qt.PenStyle.DashLine))
         painter.drawLine(self._pt(cx, 0.18), self._pt(cx, 0.78))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(HIGHLIGHT)
@@ -767,7 +759,7 @@ class TutorialStage(QWidget):
         shown = max(1, int(min(t / 0.7, 1.0) * rows))
         headers = ("帧", "t / s", "x", "y")
         painter.setFont(self._font(11, True))
-        painter.setPen(QColor("#8f8f8f"))
+        painter.setPen(_c("text_muted"))
         for i, head in enumerate(headers):
             painter.drawText(self._pt(0.08 + i * 0.22, 0.12), head)
         painter.setFont(self._font(12))
@@ -779,7 +771,7 @@ class TutorialStage(QWidget):
                 painter.drawRect(self._rect(0.06, y - 0.08, 0.88, 0.11))
                 painter.setPen(WARN)
             else:
-                painter.setPen(QColor("#d6d6d6"))
+                painter.setPen(_c("text_body"))
             painter.drawText(self._pt(0.08, y), str(row + 1))
             painter.drawText(self._pt(0.30, y), f"{row * 0.04:.2f}")
             painter.drawText(self._pt(0.52, y), f"{80 + row * 12}")
@@ -793,11 +785,11 @@ class TutorialStage(QWidget):
         unit = "m" if t > 0.55 else "px"
         scale = 0.01 if unit == "m" else 1.0
         box = self._rect(0.08, 0.08, 0.84, 0.22)
-        painter.setBrush(QColor("#2b2b2b"))
-        painter.setPen(QPen(QColor("#3e3e3e"), 1))
+        painter.setBrush(_c("toast"))
+        painter.setPen(QPen(_c("toast_border"), 1))
         painter.drawRoundedRect(box, 6, 6)
         painter.setFont(self._font(13, True))
-        painter.setPen(QColor("#f0f0f0"))
+        painter.setPen(_c("text_strong"))
         painter.drawText(
             box,
             int(Qt.AlignmentFlag.AlignCenter),
@@ -807,15 +799,15 @@ class TutorialStage(QWidget):
     def _paint_assistant(self, painter: QPainter) -> None:
         t = self._phase
         bubble = self._rect(0.10, 0.16, 0.80, 0.46)
-        painter.setBrush(QColor("#2b2b2b"))
+        painter.setBrush(_c("toast"))
         painter.setPen(QPen(HIGHLIGHT, 1))
         painter.drawRoundedRect(bubble, 10, 10)
         self._label(painter, "斜抛运动", 0.18, 0.30)
         if t > 0.28:
             painter.setFont(self._font(14))
-            painter.setPen(QColor("#80cbc4"))
+            painter.setPen(_c("teal"))
             painter.drawText(self._pt(0.18, 0.48), "y = v₀ t − ½ g t²")
-        self._label(painter, "只发送结构化数据", 0.18, 0.78, QColor("#8f8f8f"))
+        self._label(painter, "只发送结构化数据", 0.18, 0.78, _c("text_muted"))
 
     def _paint_play(self, painter: QPainter) -> None:
         t = self._phase
@@ -831,28 +823,28 @@ class TutorialStage(QWidget):
         self._ball(painter, x, y, 0.04)
         self._timeline(painter, start, end, play)
         btn = self._rect(0.08, 0.08, 0.14, 0.14)
-        painter.setBrush(QColor("#303030"))
-        painter.setPen(QPen(QColor("#4a4a4a"), 1))
+        painter.setBrush(_c("button"))
+        painter.setPen(QPen(_c("border_line"), 1))
         painter.drawRoundedRect(btn, 4, 4)
         tri = QPainterPath()
         tri.moveTo(self._pt(0.12, 0.11))
         tri.lineTo(self._pt(0.12, 0.19))
         tri.lineTo(self._pt(0.18, 0.15))
-        painter.fillPath(tri, QColor("#e2e2e2"))
+        painter.fillPath(tri, _c("playhead"))
 
     def _paint_save(self, painter: QPainter) -> None:
         t = self._phase
         doc = self._rect(0.34, 0.16, 0.32, 0.52)
-        painter.setBrush(QColor("#2d2d2d"))
-        painter.setPen(QPen(QColor("#6a6a6a"), 1.4))
+        painter.setBrush(_c("input"))
+        painter.setPen(QPen(_c("border_indicator"), 1.4))
         painter.drawRoundedRect(doc, 6, 6)
-        painter.setPen(QPen(QColor("#5a5a5a"), 1))
+        painter.setPen(QPen(_c("groove"), 1))
         for i in range(4):
             y = 0.28 + i * 0.08
             painter.drawLine(self._pt(0.40, y), self._pt(0.60, y))
         self._label(painter, "项目", 0.42, 0.22)
         if t > 0.45:
-            painter.setPen(QPen(QColor("#80cbc4"), 3))
+            painter.setPen(QPen(_c("teal"), 3))
             path = QPainterPath()
             path.moveTo(self._pt(0.42, 0.78))
             path.lineTo(self._pt(0.48, 0.86))

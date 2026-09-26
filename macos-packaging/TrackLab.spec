@@ -11,7 +11,7 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 ROOT = Path(SPECPATH).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from ai.model_manager import DEFAULT_SPEC, checkpoint_path  # noqa: E402
+from ai.model_manager import BUNDLED_SPECS, checkpoint_path  # noqa: E402
 from app import BUNDLE_IDENTIFIER, __version__  # noqa: E402
 
 ICON = ROOT / "macos-packaging" / "TrackLab.icns"
@@ -27,7 +27,8 @@ EXCLUDES = [
     "pytest",
     "scipy",
     "pandas",
-    "PIL",
+    # sam2.utils.misc imports PIL while loading SAM2VideoPredictor. Excluding
+    # it makes Hydra report "Error locating target" instead of the real import.
     "openai",
     "torchaudio",
     "PySide6.QtWebEngine",
@@ -149,6 +150,8 @@ hiddenimports = [
     "torch",
     "torchvision",
     "sam2",
+    "PIL",
+    "PIL.Image",
     "hydra",
     "omegaconf",
     "iopath",
@@ -206,6 +209,7 @@ for pkg in (
     "torch",
     "torchvision",
     "sam2",
+    "PIL",
     "hydra",
     "omegaconf",
     "iopath",
@@ -215,16 +219,16 @@ for pkg in (
     binaries += [entry for entry in pkg_binaries if _keep(entry)]
     hiddenimports += [entry for entry in pkg_hidden if _keep(entry)]
 
-ckpt = checkpoint_path(DEFAULT_SPEC)
-if not ckpt.is_file():
-    ckpt = Path.home() / ".cache" / "tracklab" / "models" / DEFAULT_SPEC.filename
-if ckpt.is_file():
+for spec in BUNDLED_SPECS:
+    ckpt = checkpoint_path(spec)
+    if not ckpt.is_file():
+        ckpt = Path.home() / ".cache" / "tracklab" / "models" / spec.filename
+    if not ckpt.is_file():
+        raise SystemExit(
+            f"missing SAM 2 checkpoint {spec.filename}; "
+            "macos-packaging/build_macos.sh downloads Tiny and Small before packing"
+        )
     datas.append((str(ckpt), "models"))
-else:
-    raise SystemExit(
-        f"missing SAM 2 checkpoint {ckpt}; run the app once or "
-        "python -c \"from ai.model_manager import ensure_checkpoint; ensure_checkpoint(download=True)\""
-    )
 
 icon = str(ICON) if ICON.is_file() else None
 
@@ -260,7 +264,7 @@ exe = EXE(
     upx=False,
     console=False,
     disable_windowed_traceback=False,
-    argv_emulation=True,
+    argv_emulation=False,
     icon=icon,
 )
 
@@ -292,22 +296,5 @@ app = BUNDLE(
         "LSMinimumSystemVersion": "13.0",
         "LSApplicationCategoryType": "public.app-category.education",
         "NSHumanReadableCopyright": "Copyright © 2026 TrackLab",
-        "CFBundleDocumentTypes": [
-            {
-                "CFBundleTypeName": "Movie",
-                "CFBundleTypeRole": "Viewer",
-                "LSHandlerRank": "Alternate",
-                "CFBundleTypeExtensions": [
-                    "mp4",
-                    "mov",
-                    "m4v",
-                    "avi",
-                    "mkv",
-                    "webm",
-                    "mpg",
-                    "mpeg",
-                ],
-            }
-        ],
     },
 )

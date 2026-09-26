@@ -56,6 +56,7 @@ class PackagingMetadataTests(unittest.TestCase):
         self.assertNotIn('"sam2"', excludes)
         self.assertIn('"moge"', excludes)
         self.assertIn('"cv2"', excludes)
+        self.assertNotIn('"PIL"', excludes)
         self.assertIn('"torch"', spec)
         self.assertIn('"sam2"', spec)
         self.assertIn('"models"', spec)
@@ -72,6 +73,8 @@ class PackagingMetadataTests(unittest.TestCase):
         self.assertIn("ai.depth_audit", spec)
         self.assertIn("ai.autotracker", spec)
         self.assertIn("ai.track_guard", spec)
+        self.assertIn("argv_emulation=False", spec)
+        self.assertNotIn("CFBundleDocumentTypes", spec)
 
     def test_spec_filters_analysis_output_not_just_collect_all(self) -> None:
         spec = (ROOT / "macos-packaging" / "TrackLab.spec").read_text(encoding="utf-8")
@@ -99,6 +102,8 @@ class PackagingMetadataTests(unittest.TestCase):
         script = (ROOT / "macos-packaging" / "build_macos.sh").read_text(encoding="utf-8")
         self.assertIn("QtWebEngineCore", script)
         self.assertIn("libavcodec*.dylib", script)
+        self.assertIn("sam2.1_hiera_tiny.pt", script)
+        self.assertIn("sam2.1_hiera_small.pt", script)
         self.assertIn("--smoke", script)
         self.assertIn('rm -rf "$ROOT/dist/TrackLab" "$ROOT/build/pyinstaller"', script)
 
@@ -115,6 +120,12 @@ class PackagingMetadataTests(unittest.TestCase):
         self.assertIn("startsWith(github.ref, 'refs/tags/v')", workflow)
         self.assertIn("TrackLab-arm64.dmg", workflow)
         self.assertIn("TrackLab-x86_64.dmg", workflow)
+        self.assertIn("TrackLab-${{ matrix.arch }}-patch.zip", workflow)
+        self.assertIn("TrackLab-arm64-patch.zip", workflow)
+        self.assertIn("TrackLab-x86_64-patch.zip", workflow)
+        self.assertIn("update-${{ matrix.arch }}.json", workflow)
+        self.assertIn("--patch-manifest", workflow)
+        self.assertIn("conda-forge", workflow)
         self.assertIn("dist-upload/update.json", workflow)
         self.assertIn("write_update_json.py", workflow)
         self.assertIn("MACOS_CERT", script)
@@ -145,6 +156,70 @@ class PackagingMetadataTests(unittest.TestCase):
             set(json.loads(json.dumps(manifest))),
             {"version", "minimum_version", "critical"},
         )
+
+    def test_patch_manifests_merge_both_architectures(self) -> None:
+        import json
+        import tempfile
+
+        writer = _load_module(
+            "tracklab_write_update_json",
+            ROOT / "macos-packaging" / "write_update_json.py",
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            arm = root / "update-arm64.json"
+            intel = root / "update-x86_64.json"
+            arm.write_text(
+                json.dumps(
+                    {
+                        "patch": {
+                            "arm64": {
+                                "asset": "TrackLab-arm64-patch.zip",
+                                "runtime": "a" * 64,
+                                "sha256": "b" * 64,
+                                "size": 10,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            intel.write_text(
+                json.dumps(
+                    {
+                        "patch": {
+                            "x86_64": {
+                                "asset": "TrackLab-x86_64-patch.zip",
+                                "runtime": "c" * 64,
+                                "sha256": "d" * 64,
+                                "size": 11,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            dest = root / "update.json"
+            self.assertEqual(
+                writer.main(
+                    [
+                        str(dest),
+                        "--patch-manifest",
+                        str(arm),
+                        "--patch-manifest",
+                        str(intel),
+                    ]
+                ),
+                0,
+            )
+            payload = json.loads(dest.read_text(encoding="utf-8"))
+        self.assertEqual(payload["version"], __version__)
+        self.assertEqual(
+            set(payload["patch"]),
+            {"arm64", "x86_64"},
+        )
+        self.assertIn("TrackLab-arm64-patch.zip", payload["assets"])
+        self.assertIn("TrackLab-x86_64-patch.zip", payload["assets"])
 
     def test_changelog_notes_for_current_version(self) -> None:
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")

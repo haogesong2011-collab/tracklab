@@ -57,6 +57,7 @@ class ViewToolbar(QWidget):
         self._visible.toggled.connect(self._on_visible_toggled)
 
         prev_btn = QPushButton()
+        self._prev_btn = prev_btn
         prev_btn.setObjectName("viewStepButton")
         prev_btn.setIcon(prev_icon())
         prev_btn.setIconSize(icon_size())
@@ -64,6 +65,7 @@ class ViewToolbar(QWidget):
         prev_btn.clicked.connect(self.prev_point_requested.emit)
 
         next_btn = QPushButton()
+        self._next_btn = next_btn
         next_btn.setObjectName("viewStepButton")
         next_btn.setIcon(next_icon())
         next_btn.setIconSize(icon_size())
@@ -107,6 +109,11 @@ class ViewToolbar(QWidget):
         self._x_field = self._fields["x"]
         self._y_field = self._fields["y"]
         layout.addStretch()
+
+    def apply_theme(self) -> None:
+        self._prev_btn.setIcon(prev_icon())
+        self._next_btn.setIcon(next_icon())
+        self._visible.setIcon(toolbar_icon("view"))
 
     def set_units(self, position_unit: str) -> None:
         self._position_unit = position_unit

@@ -54,19 +54,26 @@ class FrameDecoder:
                 frame = next(self._iter)
             except StopIteration:
                 if last is not None:
-                    return last.to_ndarray(format="rgb24")
+                    return self._rgb(last)
                 raise RuntimeError("解码到文件末尾仍未取到该帧") from None
             position = self._position_of(frame)
             self._next_index = position + 1
             if position == index:
-                return frame.to_ndarray(format="rgb24")
+                return self._rgb(frame)
             if position > index:
                 if not allow_rewind:
-                    return frame.to_ndarray(format="rgb24")
+                    return self._rgb(frame)
                 # The seek landed past the target; restart from the top once.
                 self._rewind()
                 return self._advance_to(index, allow_rewind=False)
             last = frame
+
+    @staticmethod
+    def _rgb(frame: av.VideoFrame) -> np.ndarray:
+        # Photo Booth (and other hardware decoders) pad each row, so a 1620-wide
+        # frame arrives with stride 4896 instead of 4860. That view is not
+        # C-contiguous; QImage then rejects the buffer and the picture never shows.
+        return np.ascontiguousarray(frame.to_ndarray(format="rgb24"))
 
     def _position_of(self, frame: av.VideoFrame) -> int:
         if frame.pts is None:

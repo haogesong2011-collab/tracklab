@@ -66,6 +66,8 @@ def track_metrics(
     covered = 0
     identity_swaps = 0
     recovery_gaps: list[int] = []
+    hits_3 = hits_5 = hits_10_all = 0
+    high_quality = high_quality_wrong = 0
     last_visible_ok = True
     gap = 0
 
@@ -77,13 +79,22 @@ def track_metrics(
             continue
         visible_gt += 1
         p = pred_by.get(frame)
-        if p is None or not p.visible:
+        if p is None or not p.usable_for_measurement():
             last_visible_ok = False
             gap += 1
             continue
         err = math.hypot(p.x - gt.center.x, p.y - gt.center.y)
         errors.append(err)
         covered += 1
+        hits_3 += int(err <= 3.0)
+        hits_5 += int(err <= 5.0)
+        hits_10_all += int(err <= 10.0)
+        if p.confidence >= 0.9 and p.source.value == "auto":
+            high_quality += 1
+            tolerance = 3.0
+            if gt.bbox is not None:
+                tolerance = max(3.0, 0.1 * math.hypot(gt.bbox.w, gt.bbox.h))
+            high_quality_wrong += int(err > tolerance)
         if not last_visible_ok and gap > 0:
             recovery_gaps.append(gap)
             gap = 0
@@ -114,6 +125,23 @@ def track_metrics(
         MetricSummary("center_median_px", _median(errors), med_th, False).evaluate(),
         MetricSummary("success_at_10px", success_10, suc_th, True).evaluate(),
         MetricSummary("trajectory_completeness", completeness, comp_th, True).evaluate(),
+        MetricSummary("accepted_coverage", completeness, None, True).evaluate(),
+        MetricSummary("localization_success_3px", hits_3 / visible_gt if visible_gt else 0.0, None, True).evaluate(),
+        MetricSummary("localization_success_5px", hits_5 / visible_gt if visible_gt else 0.0, None, True).evaluate(),
+        MetricSummary("localization_success_10px", hits_10_all / visible_gt if visible_gt else 0.0, None, True).evaluate(),
+        MetricSummary(
+            "high_quality_error_rate",
+            # No high-score samples is "not applicable", never a 0% pass.
+            high_quality_wrong / high_quality if high_quality else None,
+            None,
+            False,
+            details={
+                "high_quality_samples": high_quality,
+                "wrong": high_quality_wrong,
+                "high_quality_coverage": high_quality / visible_gt if visible_gt else None,
+                "not_applicable": high_quality == 0,
+            },
+        ).evaluate(),
         MetricSummary("drift_tail_mean_px", drift, None, False).evaluate(),
         MetricSummary(
             "occlusion_recovery_frames",

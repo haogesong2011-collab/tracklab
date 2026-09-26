@@ -47,6 +47,7 @@ from ai.contracts import (
     TeachingLevel,
 )
 from ai.deepseek_client import DEFAULT_CHAT_MODEL, DEFAULT_REPORT_MODEL
+from app.theme import assistant_message_css, assistant_thinking_css
 
 _ROLE_LABELS = {
     "user": "你",
@@ -226,9 +227,7 @@ class _ThinkingBlock(QFrame):
         self._body.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._body.setUndoRedoEnabled(False)
         self._body.setVisible(False)
-        self._body.document().setDefaultStyleSheet(
-            "body { color: #8a857c; background: transparent; font-size: 13px; }"
-        )
+        self._body.document().setDefaultStyleSheet(assistant_thinking_css())
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -249,6 +248,11 @@ class _ThinkingBlock(QFrame):
         self._toggle.setEnabled(True)
         self._set_header(_THINKING_LABELS[0])
         self._timer.start()
+
+    def apply_theme(self) -> None:
+        self._body.document().setDefaultStyleSheet(assistant_thinking_css())
+        if self._plain:
+            self._body.setPlainText(self._plain)
 
     def append(self, text: str) -> None:
         if not text:
@@ -343,6 +347,7 @@ class _MessageBlock(QFrame):
         self.setObjectName("assistantMessage")
         self.setProperty("kind", kind)
         self._plain = text
+        self._as_markdown = bool(markdown)
         role = QLabel(_ROLE_LABELS.get(kind, kind))
         role.setObjectName("assistantRole")
         self._thinking: _ThinkingBlock | None = None
@@ -353,11 +358,7 @@ class _MessageBlock(QFrame):
         self._body.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._body.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._body.setUndoRedoEnabled(False)
-        self._body.document().setDefaultStyleSheet(
-            "body { color: #f0ece4; background: transparent; font-size: 15px; }"
-            "a { color: #d4c4a8; }"
-            "code { background: #2a2722; color: #f0ece4; }"
-        )
+        self._body.document().setDefaultStyleSheet(assistant_message_css())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
@@ -398,13 +399,24 @@ class _MessageBlock(QFrame):
         if self._thinking is not None and self._thinking._running:
             self._thinking.finish()
         self._plain += text
+        self._as_markdown = False
         self._body.setPlainText(self._plain)
         self._body.show()
         self._clear_selection()
         self._fit()
 
+    def apply_theme(self) -> None:
+        self._body.document().setDefaultStyleSheet(assistant_message_css())
+        if self._as_markdown:
+            self._body.setMarkdown(self._plain or "")
+        else:
+            self._body.setPlainText(self._plain)
+        if self._thinking is not None:
+            self._thinking.apply_theme()
+
     def set_markdown(self, text: str) -> None:
         self._plain = text
+        self._as_markdown = True
         self._body.setMarkdown(text or "")
         if text:
             self._body.show()
@@ -581,6 +593,13 @@ class AssistantPanel(QWidget):
         layout.setSpacing(0)
         layout.addWidget(header)
         layout.addWidget(splitter, stretch=1)
+
+    def apply_theme(self) -> None:
+        for block in self.findChildren(_MessageBlock):
+            block.apply_theme()
+        for block in self.findChildren(_ThinkingBlock):
+            if block.parent() is None or not isinstance(block.parent(), _MessageBlock):
+                block.apply_theme()
 
     def _build_header(self) -> QWidget:
         header = QFrame()

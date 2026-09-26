@@ -377,6 +377,15 @@ class TutorialTests(unittest.TestCase):
             overlay.discard()
             window.close()
 
+    def test_help_explains_window_without_calling_it_fake(self) -> None:
+        from app.help_text import HELP_TEXT
+
+        self.assertIn("不是伪造", HELP_TEXT)
+        self.assertIn("4 个点", HELP_TEXT)
+        self.assertIn("Shift+Control", HELP_TEXT)
+        self.assertIn("当前", HELP_TEXT)
+        self.assertNotIn("Tracker", HELP_TEXT)
+
     def test_detailed_steps_cover_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             settings = _settings(tmp)
@@ -385,6 +394,8 @@ class TutorialTests(unittest.TestCase):
             overlay = window._tutorial_overlay
             titles = [step.title for step in overlay._steps]
             self.assertEqual(titles, STEP_TITLES)
+            assistant_body = overlay._steps[overlay.step_index("AI 助手")].body
+            self.assertIn("暂未开放", assistant_body)
             box_body = overlay._steps[overlay.step_index("框选目标")].body
             self.assertIn("Control", box_body)
             self.assertIn("不是搜索范围", box_body)
@@ -394,13 +405,16 @@ class TutorialTests(unittest.TestCase):
             self.assertIn("正点", seed_body)
             track_body = overlay._steps[overlay.step_index("按 T 跟踪")].body
             self.assertIn("按 T", track_body)
+            self.assertIn("取消", track_body)
+            fix_body = overlay._steps[overlay.step_index("跟丢了怎么修")].body
+            self.assertIn("Shift+Control", fix_body)
+            self.assertIn("当前帧", fix_body)
             mode_body = overlay._steps[overlay.step_index("快速 / 精准")].body
             self.assertIn("Tiny", mode_body)
             self.assertIn("Small", mode_body)
             ruler_body = overlay._steps[overlay.step_index("标定尺")].body
             self.assertIn("像素", ruler_body)
             self.assertIn("透视", ruler_body)
-            self.assertGreater(len(track_body), 40)
             back = overlay.findChild(QPushButton, "tutorialBack")
             self.assertIsNotNone(back)
             self.assertFalse(back.isVisible())

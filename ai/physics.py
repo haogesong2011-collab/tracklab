@@ -888,6 +888,11 @@ def _autocorr_period(t: np.ndarray, centered: np.ndarray) -> float | None:
     corr = corr[len(corr) // 2 :]
     if corr[0] <= 0:
         return None
+    # Divide by the overlap so long lags are not pulled down (the raw sum
+    # shifts the peak toward shorter periods on a short clip).
+    overlap = len(sampled) - np.arange(len(corr))
+    corr = corr / np.maximum(overlap, 1) * len(sampled)
+    corr = corr[: max(len(corr) * 3 // 4, 3)]
     min_lag = max(2, int(0.08 / dt))
     peak_i = None
     peak_v = 0.0
@@ -900,18 +905,24 @@ def _autocorr_period(t: np.ndarray, centered: np.ndarray) -> float | None:
                 break
     if peak_i is None:
         return None
-    return float(peak_i * dt)
+    # Parabolic interpolation between lags for sub-frame precision.
+    y0, y1, y2 = float(corr[peak_i - 1]), float(corr[peak_i]), float(corr[peak_i + 1])
+    curvature = y0 - 2.0 * y1 + y2
+    shift = 0.5 * (y0 - y2) / curvature if curvature < 0 else 0.0
+    return float((peak_i + max(-0.5, min(0.5, shift))) * dt)
 
 
 def _zero_crossing_period(t: np.ndarray, centered: np.ndarray) -> float | None:
-    crossings = [
-        i
-        for i in range(1, len(centered))
-        if centered[i - 1] <= 0 < centered[i] or centered[i - 1] >= 0 > centered[i]
-    ]
+    crossings: list[float] = []
+    for i in range(1, len(centered)):
+        a, b = float(centered[i - 1]), float(centered[i])
+        if a <= 0 < b or a >= 0 > b:
+            # Linear interpolation of where the sign flips, not the frame after.
+            frac = a / (a - b) if a != b else 0.0
+            crossings.append(float(t[i - 1] + frac * (t[i] - t[i - 1])))
     if len(crossings) < 3:
         return None
-    halves = [float(t[crossings[i + 1]] - t[crossings[i]]) for i in range(len(crossings) - 1)]
+    halves = [crossings[i + 1] - crossings[i] for i in range(len(crossings) - 1)]
     halves = [item for item in halves if item > 1e-6]
     if not halves:
         return None

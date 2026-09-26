@@ -13,15 +13,22 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from ai.calibration import uniform_state, near_far_state, RulerSegment, RulerRole, planar_state  # noqa: E402
-from ai.contracts import TrackPoint, TrackResult  # noqa: E402
+from ai.contracts import PromptKind, TrackPoint, TrackPrompt, TrackResult  # noqa: E402
 from ai.depth_audit import DepthAuditState, OffPlaneReading  # noqa: E402
 from ai.kinematics import (  # noqa: E402
+    FIT_ACCEL,
+    FIT_PROJECTILE,
+    FIT_UNIFORM,
+    VELOCITY_MODE_LOCAL,
+    VELOCITY_MODE_TRACKER,
     contiguous_segments,
     fit_quantity,
     is_low_confidence,
+    law_runs,
     quality_label,
     sample_at_frame,
     series_for_result,
+    trajectory_curves,
 )
 from ai.schema import Point2D  # noqa: E402
 from engine.video_index import VideoInfo  # noqa: E402
@@ -437,6 +444,115 @@ class KinematicsTests(unittest.TestCase):
         self.assertAlmostEqual(local[2].vx or 0.0, 70.0)
         default = series_for_result(result, info)
         self.assertEqual([item.vx for item in default], [item.vx for item in local])
+
+    def test_time_weights_ignore_a_frame_burst(self) -> None:
+        # Three samples piled into 0.06 s, then one sample a second later.
+        # The motion is x = 10 t. The burst is biased high. Time weights
+        # must keep the line near the long interval, not the frame count.
+        times = (0, 10, 20, 30, 1000)
+        info = _info(times)
+        biased = (0.0, 4.0, 4.0, 0.3, 10.0)
+        result = TrackResult(
+            clip_id="c",
+            points=[TrackPoint(frame=i, x=biased[i], y=0.0) for i in range(5)],
+        )
+        samples = series_for_result(result, info, velocity_step=1)
+        fitted = fit_quantity(samples, "x", 1)
+        assert fitted is not None
+        self.assertAlmostEqual(fitted.evaluate(0.5), 5.0, delta=0.8)
+
+    def test_projectile_law_uses_position_derivative(self) -> None:
+        info = _info(tuple(i * 100 for i in range(8)))
+        result = TrackResult(
+            clip_id="c",
+            points=[
+                TrackPoint(frame=i, x=float(2 + 5 * i), y=float(i * i))
+                for i in range(8)
+            ],
+        )
+        samples = series_for_result(result, info, velocity_step=1)
+        y_runs = law_runs(samples, FIT_PROJECTILE, "y")
+        vx_runs = law_runs(samples, FIT_PROJECTILE, "vx")
+        self.assertEqual(len(y_runs), 1)
+        self.assertEqual(y_runs[0][2].degree, 2)
+        self.assertEqual(len(vx_runs), 1)
+        self.assertIn("求导", vx_runs[0][2].equation("vₓ"))
+        self.assertAlmostEqual(vx_runs[0][2].evaluate(0.0), vx_runs[0][2].evaluate(0.5), places=4)
+
+    def test_occlusion_splits_the_law(self) -> None:
+        info = _info(tuple(i * 100 for i in range(6)))
+        result = TrackResult(
+            clip_id="c",
+            points=[
+                TrackPoint(frame=0, x=0, y=0),
+                TrackPoint(frame=1, x=10, y=0),
+                TrackPoint(frame=2, x=20, y=0),
+                TrackPoint(frame=3, x=0, y=0, visible=False),
+                TrackPoint(frame=4, x=40, y=0),
+                TrackPoint(frame=5, x=50, y=0),
+            ],
+        )
+        samples = series_for_result(result, info, velocity_step=1)
+        runs = law_runs(samples, FIT_UNIFORM, "x")
+        self.assertEqual(len(runs), 2)
+        self.assertLess(runs[0][1], samples[4].time_s)
+
+    def test_trajectory_curve_stays_on_a_parabola(self) -> None:
+        times = [i * 0.1 for i in range(8)]
+        xs = [20.0 + 30.0 * t for t in times]
+        ys = [100.0 + 40.0 * t - 80.0 * t * t for t in times]
+        curves = trajectory_curves(times, xs, ys, FIT_PROJECTILE)
+        self.assertEqual(len(curves), 1)
+        mid = curves[0][len(curves[0]) // 2]
+        t = times[0] + (times[-1] - times[0]) * 0.5
+        self.assertAlmostEqual(mid[0], 20.0 + 30.0 * t, delta=0.2)
+        self.assertAlmostEqual(mid[1], 100.0 + 40.0 * t - 80.0 * t * t, delta=0.5)
+
+    def test_box_prompt_seed_is_the_center(self) -> None:
+        prompt = TrackPrompt(frame=3, kind=PromptKind.BOX, x=10, y=20, x2=50, y2=60)
+        self.assertEqual(prompt.center(), (30.0, 40.0))
+
+    def test_free_fall_accel_is_g_and_breaks_on_occlusion(self) -> None:
+        g = 9.81
+        for fps, mode in (
+            (30, VELOCITY_MODE_LOCAL),
+            (120, VELOCITY_MODE_LOCAL),
+            (30, VELOCITY_MODE_TRACKER),
+        ):
+            count = fps
+            pts_ms = tuple(i * (1000 // fps) for i in range(count))
+            info = _info(pts_ms)
+            hidden = count // 2
+            points = []
+            for index, ms in enumerate(pts_ms):
+                t = ms / 1000.0
+                points.append(
+                    TrackPoint(
+                        frame=index,
+                        x=0.0,
+                        y=0.5 * g * t * t,
+                        visible=index != hidden,
+                    )
+                )
+            samples = series_for_result(
+                TrackResult(clip_id="fall", points=points),
+                info,
+                velocity_step=3,
+                velocity_mode=mode,
+            )
+            self.assertIsNone(samples[hidden].ax)
+            self.assertIsNone(samples[hidden].ay)
+            self.assertEqual(samples[0].accel_unit, "px/s²")
+            probe = samples[max(4, count // 5)]
+            self.assertIsNotNone(probe.ay)
+            # 默认纵轴向上，图像里向下的自由落体在分图上是 −g。
+            self.assertAlmostEqual(probe.ay, -g, delta=0.05)
+            self.assertIsNotNone(probe.ax)
+            self.assertAlmostEqual(probe.ax, 0.0, delta=0.05)
+            runs = law_runs(samples, FIT_ACCEL, "ay")
+            self.assertGreaterEqual(len(runs), 1)
+            _t0, _t1, law = runs[0]
+            self.assertAlmostEqual(law.evaluate(probe.time_s), -g, delta=0.05)
 
 
 if __name__ == "__main__":

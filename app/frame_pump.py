@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import QMutex, QMutexLocker, QThread, QWaitCondition, Signal
 from PySide6.QtGui import QImage
 
@@ -88,10 +89,10 @@ class FramePump(QThread):
             if image is None:
                 try:
                     array = decoder.frame(index)
+                    image = _to_qimage(array)
                 except Exception as exc:  # noqa: BLE001
                     self.failed.emit(str(exc))
                     return
-                image = _to_qimage(array)
                 self._remember(index, image)
 
             # Requests are served newest-first and in order, so whatever we just
@@ -115,12 +116,15 @@ class FramePump(QThread):
 
 
 def _to_qimage(array) -> QImage:  # noqa: ANN001
+    # Drop decoder row padding. array.data raises BufferError unless the
+    # buffer is C-contiguous, which is exactly how Photo Booth frames fail.
+    array = np.ascontiguousarray(array)
     height, width, _ = array.shape
     view = QImage(
         array.data,
         width,
         height,
-        array.strides[0],
+        int(array.strides[0]),
         QImage.Format.Format_RGB888,
     )
     # RGB32 both detaches from the numpy buffer and blits without conversion.

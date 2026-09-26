@@ -1209,6 +1209,10 @@ def compensate_result(
                 confidence=point.confidence,
                 manual=point.manual,
                 interpolated=point.interpolated,
+                note=point.note,
+                status=point.status,
+                source=point.source,
+                diagnostics=dict(point.diagnostics),
             )
         )
     return TrackResult(
@@ -1219,4 +1223,5 @@ def compensate_result(
         model_name=result.model_name,
         model_version=result.model_version,
         elapsed_s=result.elapsed_s,
+        quality_version=result.quality_version,
     )

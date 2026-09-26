@@ -15,12 +15,14 @@ if str(ROOT) not in sys.path:
 from ai.contracts import PromptKind, TrackPoint, TrackResult  # noqa: E402
 from ai.kinematics import is_low_confidence, quality_label, quality_tooltip, series_for_result  # noqa: E402
 from ai.track_guard import (  # noqa: E402
+    AppearanceEvidence,
     REJECT_BACKGROUND,
     ConstantVelocityKalman,
     MaskStats,
     PredictedBox,
     SamScores,
     drop_memory_frame,
+    bidirectional_patch_evidence,
     extract_sam_scores,
     fill_short_gaps,
     mask_stats,
@@ -28,6 +30,8 @@ from ai.track_guard import (  # noqa: E402
     recover_from_foreground,
     reprompt_candidate,
     score_mask,
+    select_component,
+    tighten_mask,
 )
 from engine.video_index import VideoInfo  # noqa: E402
 
@@ -108,7 +112,24 @@ class MaskGateTests(unittest.TestCase):
         stats = MaskStats(x=40, y=40, w=12, h=12, area=80, contour=[(34, 34), (46, 34), (46, 46), (34, 46)])
         decision = score_mask(stats, None, None, SamScores(-2.0, 0.4), median_area=None, updates=1)
         self.assertTrue(decision.accept)
-        self.assertGreaterEqual(decision.confidence, 0.72)
+        # Weak evidence stays usable during warm-up, but is no longer inflated
+        # to the old hard-coded 0.72 floor.
+        self.assertLess(decision.confidence, 0.5)
+
+    def test_missing_scores_are_not_treated_as_perfect(self) -> None:
+        stats = MaskStats(
+            x=40,
+            y=40,
+            w=12,
+            h=12,
+            area=80,
+            contour=[(34, 34), (46, 34), (46, 46), (34, 46)],
+        )
+        decision = score_mask(stats, None, None, SamScores(), median_area=None, updates=1)
+        self.assertTrue(decision.accept)
+        self.assertLess(decision.confidence, 0.6)
+        self.assertTrue(decision.diagnostics["missing_object_score"])
+        self.assertTrue(decision.diagnostics["missing_iou"])
 
     def test_stable_mask_is_accepted(self) -> None:
         stats = MaskStats(x=42, y=41, w=12, h=12, area=90, contour=[(36, 35), (48, 35), (48, 47), (36, 47)])
@@ -117,11 +138,112 @@ class MaskGateTests(unittest.TestCase):
         self.assertTrue(decision.accept)
         self.assertGreater(decision.confidence, 0.5)
 
+    def test_nearby_low_evidence_is_not_trusted(self) -> None:
+        stats = MaskStats(x=42, y=41, w=12, h=12, area=80, contour=[])
+        pred = PredictedBox(x=41, y=41, w=12, h=12, step=4, sigma=4)
+        decision = score_mask(
+            stats,
+            pred,
+            None,
+            SamScores(4.0, 0.9),
+            median_area=80.0,
+            appearance=AppearanceEvidence(similarity=0.1),
+            updates=8,
+            view_span=180,
+        )
+        # Continuous tracking (user decision, 2026-09-26): a poor template
+        # match alone keeps the measurement, flagged and with lower quality.
+        self.assertTrue(decision.accept)
+        self.assertIn("appearance", decision.diagnostics["suspect"])
+        backed = score_mask(
+            stats,
+            pred,
+            None,
+            SamScores(4.0, 0.9),
+            median_area=80.0,
+            appearance=AppearanceEvidence(similarity=0.1),
+            updates=8,
+            view_span=180,
+            reference_score=12.0,  # the model score also dropped
+        )
+        self.assertFalse(backed.accept)
+        self.assertTrue(backed.diagnostics["rejected_by_evidence"])
+
+    def test_prediction_does_not_move_a_valid_mask_centre(self) -> None:
+        mask = np.zeros((80, 120), dtype=bool)
+        mask[40:60, 40:70] = True
+        raw = mask_stats(mask)
+        assert raw is not None
+        near = select_component(mask, PredictedBox(x=30, y=55, w=8, h=8, step=2, sigma=3), 400)
+        far = select_component(mask, PredictedBox(x=90, y=10, w=8, h=8, step=2, sigma=3), 400)
+        assert near is not None and far is not None
+        self.assertAlmostEqual(near.x, raw.x)
+        self.assertAlmostEqual(far.x, raw.x)
+        self.assertAlmostEqual(near.y, raw.y)
+
+    def test_drifted_mask_with_bad_appearance_is_rejected(self) -> None:
+        stats = MaskStats(x=200, y=20, w=12, h=12, area=80, contour=[])
+        pred = PredictedBox(x=40, y=40, w=12, h=12, step=4, sigma=4)
+        decision = score_mask(
+            stats,
+            pred,
+            None,
+            SamScores(4.0, 0.9),
+            median_area=80.0,
+            appearance=AppearanceEvidence(similarity=0.1),
+            updates=8,
+            view_span=180,
+        )
+        self.assertFalse(decision.accept)
+        self.assertTrue(decision.diagnostics["rejected_by_evidence"])
+
+    def test_component_near_prediction_wins_over_large_distractor(self) -> None:
+        mask = np.zeros((80, 120), dtype=bool)
+        mask[15:25, 15:25] = True
+        mask[30:70, 70:115] = True
+        chosen = select_component(
+            mask,
+            PredictedBox(x=20, y=20, w=10, h=10, step=3, sigma=4),
+            expected_area=100,
+        )
+        self.assertIsNotNone(chosen)
+        assert chosen is not None
+        self.assertLess(abs(chosen.x - 20), 2)
+        self.assertLess(chosen.area, 200)
+
+    def test_loose_mask_is_cropped_back_to_the_object(self) -> None:
+        mask = np.zeros((80, 160), dtype=bool)
+        mask[20:70, 40:140] = True
+        pred = PredictedBox(x=48, y=28, w=8, h=8, step=4, sigma=4)
+        chosen = tighten_mask(mask_stats(mask), mask, pred, expected_area=64)
+        self.assertIsNotNone(chosen)
+        assert chosen is not None
+        self.assertLess(abs(chosen.x - 48), 12)
+        self.assertLess(abs(chosen.y - 28), 12)
+        self.assertLess(chosen.area, 500)
+        self.assertLess(chosen.w, 30)
+
     def test_mask_stats_empty(self) -> None:
         self.assertIsNone(mask_stats(np.zeros((8, 8), dtype=bool)))
 
 
 class MotionForegroundTests(unittest.TestCase):
+    def test_bidirectional_patch_check_detects_consistent_translation(self) -> None:
+        rng = np.random.default_rng(3)
+        prev = np.zeros((60, 80), dtype=np.float32)
+        texture = rng.normal(128, 35, (11, 11)).astype(np.float32)
+        prev[25:36, 25:36] = texture
+        cur = np.zeros_like(prev)
+        cur[28:39, 30:41] = texture
+        quality, error = bidirectional_patch_evidence(
+            prev, cur, (30, 30), (35, 33), search=7
+        )
+        self.assertIsNotNone(quality)
+        self.assertIsNotNone(error)
+        assert quality is not None and error is not None
+        self.assertGreater(quality, 0.8)
+        self.assertLess(error, 0.5)
+
     def test_stripes_leave_only_the_moving_disk(self) -> None:
         h, w = 80, 120
         prev = np.zeros((h, w, 3), dtype=np.uint8)
@@ -176,6 +298,18 @@ class MemoryAndScoreTests(unittest.TestCase):
         }
         scores = extract_sam_scores((4, [1], [0]), state, 4, 1)
         self.assertAlmostEqual(scores.object_score or 0.0, -1.0)
+
+    def test_extract_sam_scores_uses_requested_object_only(self) -> None:
+        state = {
+            "obj_id_to_idx": {7: 0, 9: 1},
+            "obj_ids": [7, 9],
+            "output_dict_per_obj": {
+                0: {"non_cond_frame_outputs": {2: {"object_score_logits": 8.0}}},
+                1: {"non_cond_frame_outputs": {2: {"object_score_logits": -3.0}}},
+            },
+        }
+        scores = extract_sam_scores((2, [7, 9], [0, 0]), state, 2, 9)
+        self.assertAlmostEqual(scores.object_score or 0.0, -3.0)
 
 
 class GapAndRecoveryTests(unittest.TestCase):
@@ -238,6 +372,40 @@ class KinematicsRejectTests(unittest.TestCase):
         self.assertEqual(quality_label(samples[0]), "已拒收")
         self.assertIn("已拒收：疑似跳到背景", quality_tooltip(samples[0]))
         self.assertFalse(is_low_confidence(samples[1]))
+
+    def test_hover_names_the_failed_check(self) -> None:
+        result = TrackResult(
+            clip_id="c",
+            points=[
+                TrackPoint(
+                    frame=0,
+                    x=10,
+                    y=10,
+                    visible=False,
+                    confidence=0.2,
+                    diagnostics={"appearance_ambiguous": True, "rejected_by_evidence": True},
+                ),
+            ],
+        )
+        sample = series_for_result(result, _info((0,)))[0]
+        self.assertIn("外观歧义", quality_tooltip(sample))
+
+    def test_hover_names_the_failed_check(self) -> None:
+        result = TrackResult(
+            clip_id="c",
+            points=[
+                TrackPoint(
+                    frame=0,
+                    x=10,
+                    y=10,
+                    visible=False,
+                    confidence=0.2,
+                    diagnostics={"appearance_ambiguous": True, "rejected_by_evidence": True},
+                ),
+            ],
+        )
+        sample = series_for_result(result, _info((0,)))[0]
+        self.assertIn("外观歧义", quality_tooltip(sample))
 
 
 if __name__ == "__main__":

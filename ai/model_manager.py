@@ -62,7 +62,20 @@ SAM21_SMALL = ModelSpec(
     hf_id="facebook/sam2.1-hiera-small",
 )
 
+BOOTSTAPIR = ModelSpec(
+    model_id="bootstapir",
+    filename="bootstapir_checkpoint_v2.pt",
+    url="https://storage.googleapis.com/dm-tapnet/bootstap/bootstapir_checkpoint_v2.pt",
+    sha256="8493c7a69e02c85b9382fbb3c7b8b539b36bc08ede744b9e99feb739a0129f4b",
+    config="",
+    license="Apache-2.0",
+    version="2.0",
+    hf_id="google/tapnet",
+)
+
 DEFAULT_SPEC = SAM21_TINY
+# Both ship inside the macOS app. School networks often cannot fetch the weights later.
+BUNDLED_SPECS = (SAM21_TINY, SAM21_SMALL)
 
 
 def spec_for_mode(mode: TrackMode) -> ModelSpec:
@@ -285,12 +298,19 @@ def select_device() -> str:
 
 def load_sam2_predictor(spec: ModelSpec = DEFAULT_SPEC, *, download: bool = False):
     """Build a SAM 2 video predictor. Imports torch/sam2 lazily."""
+    from ai.sam_runtime import reserve_system_headroom
+
+    reserve_system_headroom()
     try:
         from sam2.build_sam import build_sam2_video_predictor
     except ImportError as exc:
         raise ModelNotAvailable(
             "未安装 SAM 2。请执行：pip install -r requirements-ai.txt"
         ) from exc
+    from ai.sam_runtime import use_float32_mask_memory, use_real_rope_on_mps
+
+    use_float32_mask_memory()
+    use_real_rope_on_mps()
     ckpt = ensure_checkpoint(spec, download=download)
     device = select_device()
     try:

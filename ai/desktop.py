@@ -27,8 +27,11 @@ from ai.contracts import (
     TrackLayer,
     TrackMode,
     TrackPoint,
+    TrackPointSource,
+    TrackPointStatus,
     TrackPrompt,
     TrackResult,
+    TrackingTarget,
 )
 from ai.depth_audit import DepthAuditState, audit_track, try_load_moge
 from ai.kinematics import DEFAULT_VELOCITY_MODE, DEFAULT_VELOCITY_STEP, quality_label, series_for_result
@@ -119,6 +122,8 @@ class TrackWorker(QObject):
         tracker=None,  # noqa: ANN001
         track_mode: TrackMode = TrackMode.PRECISE,
         anti_interference: bool = True,
+        tracking_target: TrackingTarget = TrackingTarget.OBJECT_CENTER,
+        projectile: bool = False,
     ) -> None:
         super().__init__(parent)
         self._path = Path(video_path)
@@ -131,6 +136,8 @@ class TrackWorker(QObject):
         self._tracker = tracker
         self._track_mode = track_mode
         self._anti_interference = bool(anti_interference)
+        self._projectile = bool(projectile)
+        self._tracking_target = TrackingTarget(tracking_target)
 
     def cancel(self) -> None:
         self._token.cancel()
@@ -138,19 +145,39 @@ class TrackWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
+            from ai.sam_runtime import prepare_inference_thread
+
+            prepare_inference_thread()
             info = load_video(self._path)
             tracker = self._tracker
             stride = 1
             image_size = None
             if tracker is None:
-                from ai.sam2_tracker import Sam2Tracker
-                from ai.sam_runtime import SamRuntime, settings_for_mode
+                if self._tracking_target is TrackingTarget.SURFACE_POINT:
+                    from ai.tapir_tracker import BootsTapirTracker
 
-                spec, stride, image_size = settings_for_mode(self._track_mode)
-                predictor = SamRuntime.instance().predictor_for(spec)
-                tracker = Sam2Tracker(predictor=predictor, spec=spec)
+                    # Precise mode adds the local 512 route; fast mode keeps
+                    # the bounded full-frame 256 route only.
+                    tracker = BootsTapirTracker(
+                        local_refine=self._track_mode is not TrackMode.FAST
+                    )
+                else:
+                    from ai.sam2_tracker import Sam2Tracker
+                    from ai.sam_runtime import SamRuntime, settings_for_mode
+
+                    spec, stride, image_size = settings_for_mode(self._track_mode)
+                    predictor = SamRuntime.instance().predictor_for(spec)
+                    tracker = Sam2Tracker(predictor=predictor, spec=spec)
+
+            last_emit = 0.0
 
             def on_progress(event: ProgressEvent) -> None:
+                nonlocal last_emit
+                now = time.monotonic()
+                done = event.total > 0 and event.current >= event.total
+                if event.current > 2 and not done and now - last_emit < 0.2:
+                    return
+                last_emit = now
                 self.progress.emit(event)
 
             result = tracker.track(
@@ -164,6 +191,7 @@ class TrackWorker(QObject):
                 stride=stride,
                 image_size=image_size,
                 anti_interference=self._anti_interference,
+                projectile=self._projectile,
             )
             result.track_id = self.track_id  # type: ignore[attr-defined]
             self.finished.emit(result)
@@ -270,7 +298,9 @@ def run_track_in_thread(
     tracker=None,  # noqa: ANN001
     track_mode: TrackMode = TrackMode.PRECISE,
     anti_interference: bool = True,
+    tracking_target: TrackingTarget = TrackingTarget.OBJECT_CENTER,
     thread: QThread | None = None,
+    projectile: bool = False,
 ) -> tuple[QThread, TrackWorker]:
     """Spawn or queue a track job. Never reuse FramePump's thread."""
     worker = TrackWorker(
@@ -283,6 +313,8 @@ def run_track_in_thread(
         tracker=tracker,
         track_mode=track_mode,
         anti_interference=anti_interference,
+        tracking_target=tracking_target,
+        projectile=projectile,
     )
     owned = thread is None
     if thread is None:
@@ -470,6 +502,9 @@ def apply_manual_override(
         visible=True,
         confidence=1.0,
         manual=True,
+        status=TrackPointStatus.TRUSTED,
+        source=TrackPointSource.MANUAL,
+        diagnostics={"manual_override": True},
     )
     for i, existing in enumerate(points):
         if existing.frame == frame:
@@ -486,6 +521,7 @@ def apply_manual_override(
         model_name=result.model_name,
         model_version=result.model_version,
         elapsed_s=result.elapsed_s,
+        quality_version=result.quality_version,
     )
 
 
@@ -626,6 +662,10 @@ def build_assistant_report(assistant: AssistantState, *, stale: bool = False) ->
     )
 
 
+def _opt(value: float | None, digits: int = 4) -> str:
+    return "" if value is None else f"{value:.{digits}f}"
+
+
 def export_track_csv(
     path: Path,
     result: TrackResult,
@@ -635,6 +675,7 @@ def export_track_csv(
     velocity_step: int | None = None,
     velocity_mode: str | None = None,
     depth_audit: DepthAuditState | None = None,
+    derivative_model: str | None = None,
 ) -> None:
     samples = series_for_result(
         result,
@@ -643,13 +684,16 @@ def export_track_csv(
         velocity_step=DEFAULT_VELOCITY_STEP if velocity_step is None else velocity_step,
         velocity_mode=DEFAULT_VELOCITY_MODE if velocity_mode is None else velocity_mode,
         depth_audit=depth_audit,
+        derivative_model=derivative_model or "off",
     )
     unit = samples[0].position_unit if samples else ("m" if calibration and calibration.active else "px")
     speed = samples[0].speed_unit if samples else ("m/s" if unit == "m" else "px/s")
     pos_key = "m" if unit == "m" else "px"
     spd_key = "m_s" if unit == "m" else "px_s"
-    with Path(path).open("w", encoding="utf-8", newline="") as fh:
+    points_by_frame = {point.frame: point for point in result.points}
+    with Path(path).open("w", encoding="utf-8-sig", newline="") as fh:
         writer = csv.writer(fh)
+        acc_key = "m_s2" if unit == "m" else "px_s2"
         writer.writerow(
             [
                 "frame",
@@ -661,14 +705,48 @@ def export_track_csv(
                 f"v_{spd_key}",
                 "visible",
                 "confidence",
+                "tracking_status",
+                "tracking_source",
+                "quality_version",
+                "raw_object_score",
+                "raw_iou",
+                "appearance_similarity",
+                "forward_backward_error_px",
+                "motion_score",
+                "area_ratio",
+                "memory_admitted",
                 "sigma_x",
                 "sigma_y",
                 "quality",
                 "off_plane_m",
                 "source",
+                f"ax_{acc_key}",
+                f"ay_{acc_key}",
+                f"sigma_vx_{spd_key}",
+                f"sigma_vy_{spd_key}",
+                f"sigma_ax_{acc_key}",
+                f"sigma_ay_{acc_key}",
+                "window_v_s",
+                "window_a_s",
+                "kinematics_source",
+                f"vx_local_{spd_key}",
+                f"vy_local_{spd_key}",
+                f"ax_local_{acc_key}",
+                f"ay_local_{acc_key}",
             ]
         )
         for sample in samples:
+            point = points_by_frame.get(sample.frame)
+            diagnostics = {} if point is None else point.diagnostics
+            def _diag(name: str) -> str:
+                value = diagnostics.get(name)
+                if value is None:
+                    return ""
+                if isinstance(value, bool):
+                    return "1" if value else "0"
+                if isinstance(value, float):
+                    return f"{value:.6f}"
+                return str(value)
             writer.writerow(
                 [
                     sample.frame,
@@ -680,11 +758,34 @@ def export_track_csv(
                     "" if sample.speed is None else f"{sample.speed:.4f}",
                     int(sample.visible),
                     f"{sample.confidence:.4f}",
+                    "" if point is None else point.status.value,
+                    "" if point is None else point.source.value,
+                    result.quality_version,
+                    _diag("raw_object_score"),
+                    _diag("raw_iou"),
+                    _diag("appearance"),
+                    _diag("forward_backward_error_px"),
+                    _diag("motion"),
+                    _diag("area_ratio"),
+                    _diag("memory_admitted"),
                     "" if sample.sigma_x is None else f"{sample.sigma_x:.6f}",
                     "" if sample.sigma_y is None else f"{sample.sigma_y:.6f}",
                     quality_label(sample),
                     "" if sample.off_plane_m is None else f"{sample.off_plane_m:.6f}",
                     sample.source,
+                    "" if sample.ax is None else f"{sample.ax:.4f}",
+                    "" if sample.ay is None else f"{sample.ay:.4f}",
+                    _opt(sample.sigma_vx),
+                    _opt(sample.sigma_vy),
+                    _opt(sample.sigma_ax),
+                    _opt(sample.sigma_ay),
+                    _opt(sample.window_v_s, 3),
+                    _opt(sample.window_a_s, 3),
+                    "" if sample.x is None else sample.kinematics_source,
+                    _opt(sample.local_vx),
+                    _opt(sample.local_vy),
+                    _opt(sample.local_ax),
+                    _opt(sample.local_ay),
                 ]
             )
 

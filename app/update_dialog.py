@@ -159,6 +159,17 @@ def run_self_update_in_thread(
     return thread, worker
 
 
+def _download_hint(info: UpdateInfo) -> str:
+    installer = info.installer
+    full = f"约 {format_bytes(installer.size)}" if installer is not None and installer.size else "完整安装包"
+    spec = info.patch_for()
+    if spec is not None and spec.size:
+        return f"优先下载补丁（约 {format_bytes(spec.size)}）。不适用时下载{full}"
+    if spec is not None:
+        return f"优先下载补丁。不适用时下载{full}"
+    return f"下载{full}"
+
+
 class UpdateDialog(QDialog):
     def __init__(self, parent: QWidget | None, info: UpdateInfo) -> None:
         super().__init__(parent)
@@ -185,13 +196,10 @@ class UpdateDialog(QDialog):
 
         self._self_update = can_self_update(info)
         if self._self_update:
-            size = 0
-            installer = info.installer
-            if installer is not None:
-                size = installer.size
-            extra = "约 " + format_bytes(size) if size else "安装包"
             hint = QLabel(
-                f"点击「立即更新」将下载{extra}，校验后替换当前应用并重启。"
+                "点击「立即更新」将"
+                + _download_hint(info)
+                + "，校验后替换当前应用并重启。"
             )
             hint.setWordWrap(True)
             hint.setObjectName("panelHint")

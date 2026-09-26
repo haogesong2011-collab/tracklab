@@ -8,7 +8,15 @@ from typing import Any
 
 import numpy as np
 
-from ai.contracts import CancelToken, ProgressCb, PromptKind, TrackPrompt, TrackPoint
+from ai.contracts import (
+    CancelToken,
+    ProgressCb,
+    PromptKind,
+    TrackPoint,
+    TrackPointSource,
+    TrackPointStatus,
+    TrackPrompt,
+)
 from ai.geometry import interpolate_xy
 from ai.models import _emit
 from engine.decoder import FrameDecoder
@@ -91,6 +99,9 @@ def densify_track_points(
                     manual=existing.manual,
                     interpolated=existing.interpolated,
                     note=existing.note,
+                    status=existing.status,
+                    source=existing.source,
+                    diagnostics=dict(existing.diagnostics),
                 )
             )
             continue
@@ -129,6 +140,9 @@ def densify_track_points(
                     visible=True,
                     confidence=min(prev.confidence, nxt.confidence),
                     interpolated=True,
+                    status=TrackPointStatus.REVIEW,
+                    source=TrackPointSource.INTERPOLATED,
+                    diagnostics={"interpolation": "catmull_rom" if controls is not None else "linear"},
                 )
             )
             continue
@@ -141,6 +155,8 @@ def densify_track_points(
                 visible=False,
                 confidence=0.0,
                 interpolated=False,
+                status=TrackPointStatus.LOST,
+                source=TrackPointSource.AUTO,
             )
         )
     return filled
@@ -177,6 +193,14 @@ def shift_prompts(
 
 OFFLOAD_STATE_FRAMES = 400
 LAZY_FRAME_CACHE = 8
+
+
+def should_offload_state(device: Any, n_frames: int) -> bool:
+    """MPS keeps the memory bank on CPU so the window server still has RAM."""
+    kind = str(getattr(device, "type", device)).lower()
+    if "mps" in kind:
+        return True
+    return n_frames >= OFFLOAD_STATE_FRAMES
 
 
 def rgb_to_sam_tensor(rgb: np.ndarray, image_size: int):
@@ -322,9 +346,9 @@ def build_video_state(
     import torch
 
     n_frames = len(images)
-    if offload_state_to_cpu is None:
-        offload_state_to_cpu = n_frames >= OFFLOAD_STATE_FRAMES
     compute_device = predictor.device
+    if offload_state_to_cpu is None:
+        offload_state_to_cpu = should_offload_state(compute_device, n_frames)
     state = {
         "images": images,
         "num_frames": n_frames,

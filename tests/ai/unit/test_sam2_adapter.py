@@ -199,6 +199,11 @@ class FakeSam2TrackerTests(unittest.TestCase):
         rb = Sam2Tracker(predictor=b).track(info, seed, start_frame=0, end_frame=4)
         self.assertNotAlmostEqual(ra.points[-1].x, rb.points[-1].x, places=2)
 
+    def test_missing_object_id_does_not_borrow_another_mask(self) -> None:
+        from ai.sam2_tracker import Sam2Tracker
+
+        self.assertIsNone(Sam2Tracker._pick_mask([2, 3], [np.zeros((2, 2)), np.ones((2, 2))], 1))
+
     def test_cancel_during_propagate(self) -> None:
         info, ann = self._ball()
         seed = (ann.track[0].center.x, ann.track[0].center.y)
@@ -650,11 +655,15 @@ class TrackGuardIntegrationTests(unittest.TestCase):
             self.assertGreater(
                 abs(jumped[0].x - centre[0]) + abs(jumped[0].y - centre[1]), 20.0
             )
-        self.assertGreaterEqual(len(fake.boxes), 1)
+        # The next window is seeded from the last committed frame (2), which is
+        # decoded and prepended as its own frame, not relabelled as frame 3.
+        # The rest of the clip is tracked instead of being written off.
+        self.assertTrue(fake.boxes)
+        frame2 = next(p for p in result.points if p.frame == 2)
         box = fake.boxes[0]
-        self.assertLess(box[2] - box[0], 40.0)
-        self.assertLess(box[3] - box[1], 40.0)
-        self.assertTrue(any("box" in kinds for kinds in fake.prompt_kinds[1:]))
+        self.assertAlmostEqual((box[0] + box[2]) / 2.0, frame2.x, delta=1.0)
+        self.assertIn(5, fake.windows)  # [2, 3, 4, 5, 6]
+        self.assertTrue(any(point.visible for point in result.points[4:]))
 
     def test_jumped_mask_is_rejected_and_reprompt_recovers(self) -> None:
         try:
@@ -700,7 +709,9 @@ class TrackGuardIntegrationTests(unittest.TestCase):
                 ],
             )
             by_frame = {p.frame: p for p in result.points}
-            self.assertTrue({6, 7}.issubset(set(tracker.dropped_frames)))
+            # Frame 6 is rejected; a moving blob sits on the prediction, so SAM
+            # is re-prompted on that same frame and the object is found again.
+            self.assertIn(6, tracker.dropped_frames)
             for frame in (6, 7):
                 point = by_frame[frame]
                 if point.visible:
@@ -748,6 +759,166 @@ class FastModeResolutionTests(unittest.TestCase):
         source = inspect.getsource(tracker)
         self.assertNotIn("F.interpolate", source)
         self.assertNotIn("FAST_TRACK_IMAGE_SIZE", source)
+
+
+class InferenceHeadroomTests(unittest.TestCase):
+    def test_thread_budget_leaves_two_cores(self) -> None:
+        from ai.sam_runtime import inference_thread_budget
+
+        self.assertEqual(inference_thread_budget(8), 6)
+        self.assertEqual(inference_thread_budget(2), 1)
+        self.assertEqual(inference_thread_budget(1), 1)
+
+    def test_mps_fallback_is_enabled_before_torch(self) -> None:
+        import os
+
+        from ai.sam_runtime import reserve_system_headroom
+
+        os.environ.pop("PYTORCH_ENABLE_MPS_FALLBACK", None)
+        reserve_system_headroom()
+        self.assertEqual(os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK"), "1")
+
+    def test_bfloat16_mask_memory_becomes_float32(self) -> None:
+        import torch
+
+        from ai.sam_runtime import _BFloat16AsFloat32, install_float32_mask_memory
+
+        proxy = _BFloat16AsFloat32(torch)
+        self.assertIs(proxy.bfloat16, torch.float32)
+        self.assertIs(proxy.float32, torch.float32)
+
+        module = type("_Module", (), {"torch": torch})()
+        install_float32_mask_memory([module], torch)
+        self.assertIs(module.torch.bfloat16, torch.float32)
+        install_float32_mask_memory([module], torch)
+        self.assertIs(module.torch.bfloat16, torch.float32)
+
+    def test_mps_without_bfloat16_is_detected(self) -> None:
+        from ai.sam_runtime import mps_supports_bfloat16
+
+        class _Mps:
+            def is_available(self) -> bool:
+                return True
+
+        class _Backends:
+            mps = _Mps()
+
+        class _Torch:
+            backends = _Backends()
+            bfloat16 = "bf16"
+
+            @staticmethod
+            def zeros(*_args, **_kwargs):
+                raise RuntimeError("BFloat16 is not supported on MPS")
+
+        self.assertFalse(mps_supports_bfloat16(_Torch()))
+
+        class _NoMps:
+            def is_available(self) -> bool:
+                return False
+
+        class _Idle:
+            class backends:
+                mps = _NoMps()
+
+        self.assertTrue(mps_supports_bfloat16(_Idle()))
+
+    def test_real_rope_matches_complex_on_cpu(self) -> None:
+        import torch
+        from sam2.modeling.position_encoding import apply_rotary_enc, compute_axial_cis
+
+        from ai.sam_runtime import apply_rotary_enc_real, compute_axial_cis_real
+
+        dim = 32
+        cis = compute_axial_cis(dim, 4, 4)
+        real = compute_axial_cis_real(dim, 4, 4)
+        q = torch.randn(2, 2, 16, dim)
+        k = torch.randn(2, 2, 16, dim)
+        q_complex, k_complex = apply_rotary_enc(q, k, cis, repeat_freqs_k=False)
+        q_real, k_real = apply_rotary_enc_real(q, k, real, repeat_freqs_k=False)
+        self.assertTrue(torch.allclose(q_complex, q_real, atol=1e-5))
+        self.assertTrue(torch.allclose(k_complex, k_real, atol=1e-5))
+
+        k_long = torch.randn(2, 2, 32, dim)
+        q_complex, k_complex = apply_rotary_enc(q, k_long, cis, repeat_freqs_k=True)
+        q_real, k_real = apply_rotary_enc_real(q, k_long, real, repeat_freqs_k=True)
+        self.assertTrue(torch.allclose(q_complex, q_real, atol=1e-5))
+        self.assertTrue(torch.allclose(k_complex, k_real, atol=1e-5))
+
+        empty = k[:, :, :0]
+        q_complex, k_complex = apply_rotary_enc(q, empty, cis)
+        q_real, k_real = apply_rotary_enc_real(q, empty, real)
+        self.assertTrue(torch.allclose(q_complex, q_real, atol=1e-5))
+        self.assertEqual(k_real.shape[-2], 0)
+
+    def test_real_rope_install_replaces_sam2_names(self) -> None:
+        from ai.sam_runtime import (
+            apply_rotary_enc_real,
+            compute_axial_cis_real,
+            install_real_rope,
+        )
+
+        module = type("Pe", (), {"compute_axial_cis": lambda: None, "apply_rotary_enc": lambda: None})()
+        install_real_rope([module])
+        self.assertIs(module.compute_axial_cis, compute_axial_cis_real)
+        self.assertIs(module.apply_rotary_enc, apply_rotary_enc_real)
+        install_real_rope([module])
+        self.assertIs(module.compute_axial_cis, compute_axial_cis_real)
+
+    def test_mps_without_complex_is_detected(self) -> None:
+        from ai.sam_runtime import mps_supports_complex
+
+        class _Mps:
+            def is_available(self) -> bool:
+                return True
+
+        class _Torch:
+            class backends:
+                mps = _Mps()
+
+            @staticmethod
+            def ones(*_args, **_kwargs):
+                return object()
+
+            @staticmethod
+            def zeros(*_args, **_kwargs):
+                return object()
+
+            @staticmethod
+            def polar(*_args, **_kwargs):
+                class _Complex:
+                    def to(self, *_a, **_k):
+                        raise RuntimeError("Unsupported type byte size: ComplexFloat")
+
+                return _Complex()
+
+        self.assertFalse(mps_supports_complex(_Torch()))
+
+    def test_intel_mps_always_uses_real_rope(self) -> None:
+        from ai.sam_runtime import mps_needs_real_rope
+
+        class _Mps:
+            def is_available(self) -> bool:
+                return True
+
+        class _Torch:
+            class backends:
+                mps = _Mps()
+
+        self.assertTrue(mps_needs_real_rope(_Torch(), machine="x86_64"))
+        self.assertFalse(mps_needs_real_rope(type("Off", (), {})(), machine="x86_64"))
+
+    def test_mps_offloads_state_even_for_a_short_clip(self) -> None:
+        from ai.sam2_frames import should_offload_state
+        from ai.sam2_tracker import should_offload_video
+
+        class _Device:
+            type = "mps"
+
+        device = _Device()
+        self.assertTrue(should_offload_state(device, 4))
+        self.assertTrue(should_offload_video(device, 4, 32))
+        self.assertFalse(should_offload_state(type("C", (), {"type": "cpu"})(), 4))
 
 
 if __name__ == "__main__":

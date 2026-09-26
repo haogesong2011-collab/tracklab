@@ -17,6 +17,31 @@ class TrackMode(str, Enum):
     PRECISE = "precise"
 
 
+class TrackingTarget(str, Enum):
+    """What a trajectory means geometrically."""
+
+    OBJECT_CENTER = "object_center"
+    SURFACE_POINT = "surface_point"
+
+
+class TrackPointStatus(str, Enum):
+    TRUSTED = "trusted"
+    REVIEW = "review"
+    LOST = "lost"
+
+
+class TrackPointSource(str, Enum):
+    AUTO = "auto"
+    MANUAL = "manual"
+    INTERPOLATED = "interpolated"
+    PREDICTED = "predicted"
+    LEGACY = "legacy"
+
+
+# v2: object-only appearance, pyramid LK point evidence, two-frame recovery.
+TRACK_QUALITY_VERSION = "evidence-v2"
+
+
 FAST_TRACK_STRIDE = 3
 
 
@@ -42,19 +67,59 @@ class TrackPoint:
     manual: bool = False
     interpolated: bool = False
     note: str = ""
+    status: TrackPointStatus = TrackPointStatus.TRUSTED
+    source: TrackPointSource = TrackPointSource.AUTO
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+
+    def usable_for_measurement(self) -> bool:
+        return (
+            self.visible
+            and self.status is TrackPointStatus.TRUSTED
+            and self.source not in {TrackPointSource.INTERPOLATED, TrackPointSource.PREDICTED}
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TrackPoint":
+        manual = bool(data.get("manual", False))
+        interpolated = bool(data.get("interpolated", False))
+        visible = bool(data.get("visible", True))
+        raw_status = data.get("status")
+        raw_source = data.get("source")
+        status = (
+            TrackPointStatus(raw_status)
+            if raw_status is not None
+            else (TrackPointStatus.TRUSTED if visible else TrackPointStatus.LOST)
+        )
+        source = (
+            TrackPointSource(raw_source)
+            if raw_source is not None
+            else (
+                TrackPointSource.MANUAL
+                if manual
+                else TrackPointSource.INTERPOLATED
+                if interpolated
+                else TrackPointSource.LEGACY
+            )
+        )
         return cls(
             frame=int(data["frame"]),
             x=float(data["x"]),
             y=float(data["y"]),
-            visible=bool(data.get("visible", True)),
+            visible=visible,
             confidence=float(data.get("confidence", 1.0)),
-            manual=bool(data.get("manual", False)),
-            interpolated=bool(data.get("interpolated", False)),
+            manual=manual,
+            interpolated=interpolated,
             note=str(data.get("note", "") or ""),
+            status=status,
+            source=source,
+            diagnostics=dict(data.get("diagnostics") or {}),
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["status"] = self.status.value
+        data["source"] = self.source.value
+        return data
 
 
 @dataclass
@@ -66,9 +131,11 @@ class TrackResult:
     model_name: str = ""
     model_version: str = ""
     elapsed_s: float = 0.0
+    quality_version: str = "legacy"
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        data["points"] = [point.to_dict() for point in self.points]
         data["failure_reason"] = self.failure_reason.value
         return data
 
@@ -82,6 +149,7 @@ class TrackResult:
             model_name=str(data.get("model_name", "")),
             model_version=str(data.get("model_version", "")),
             elapsed_s=float(data.get("elapsed_s", 0.0)),
+            quality_version=str(data.get("quality_version", "legacy")),
         )
 
 
@@ -111,6 +179,12 @@ class TrackPrompt:
     y: float
     x2: float | None = None
     y2: float | None = None
+
+    def center(self) -> tuple[float, float]:
+        """Point prompts use (x, y). A box uses its center, not the corner."""
+        if self.kind is PromptKind.BOX and self.x2 is not None and self.y2 is not None:
+            return ((self.x + self.x2) / 2.0, (self.y + self.y2) / 2.0)
+        return (self.x, self.y)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -143,6 +217,7 @@ class TrackLayer:
     result: TrackResult | None = None
     contours: dict[int, list[tuple[float, float]]] = field(default_factory=dict)
     status: str = "idle"
+    tracking_target: TrackingTarget = TrackingTarget.OBJECT_CENTER
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -158,6 +233,7 @@ class TrackLayer:
                 for frame, points in self.contours.items()
             },
             "status": self.status,
+            "tracking_target": self.tracking_target.value,
         }
 
     @classmethod
@@ -176,6 +252,9 @@ class TrackLayer:
             result=None if not result else TrackResult.from_dict(result),
             contours=contours,
             status=str(data.get("status", "idle")),
+            tracking_target=TrackingTarget(
+                data.get("tracking_target", TrackingTarget.OBJECT_CENTER.value)
+            ),
         )
 
 
