@@ -80,8 +80,11 @@ jobs:
         if: matrix.arch == 'x86_64'
         shell: "bash -el {0}"
         run: |
-          set -euo pipefail
-          conda install -y pytorch torchvision
+          # nounset makes conda's MKL deactivate hook fail after a successful install.
+          set +u
+          conda install -y pytorch torchvision || true
+          python -c "import torch, torchvision; print(torch.__version__, torchvision.__version__)" || exit 1
+          test -n "$CONDA_PREFIX" || exit 1
           echo "VIRTUAL_ENV=$CONDA_PREFIX" >> "$GITHUB_ENV"
           echo "PATH=$CONDA_PREFIX/bin:$PATH" >> "$GITHUB_ENV"
       - name: Install dependencies
