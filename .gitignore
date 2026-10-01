@@ -15,3 +15,5 @@ models/
 *.pt
 *.mp4
 !tests/ai/fixtures/*.mp4
+macos-packaging/TrackLab.icns
+macos-packaging/TrackLab.iconset/

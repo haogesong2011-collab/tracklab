@@ -27,11 +27,14 @@ from ai.contracts import (
     TrackLayer,
     TrackMode,
     TrackPoint,
+    TrackPointSource,
+    TrackPointStatus,
     TrackPrompt,
     TrackResult,
+    TrackingTarget,
 )
 from ai.depth_audit import DepthAuditState, audit_track, try_load_moge
-from ai.kinematics import DEFAULT_VELOCITY_STEP, quality_label, series_for_result
+from ai.kinematics import DEFAULT_VELOCITY_MODE, DEFAULT_VELOCITY_STEP, quality_label, series_for_result
 from ai.model_manager import DownloadCancelled, ModelNotAvailable, ModelSpec, ensure_checkpoint
 from ai.models import ColorBlobTracker, load_video
 from ai.schema import Point2D
@@ -118,6 +121,9 @@ class TrackWorker(QObject):
         prompts: list[TrackPrompt] | None = None,
         tracker=None,  # noqa: ANN001
         track_mode: TrackMode = TrackMode.PRECISE,
+        anti_interference: bool = True,
+        tracking_target: TrackingTarget = TrackingTarget.OBJECT_CENTER,
+        projectile: bool = False,
     ) -> None:
         super().__init__(parent)
         self._path = Path(video_path)
@@ -129,6 +135,9 @@ class TrackWorker(QObject):
         self._prompts = list(prompts or [])
         self._tracker = tracker
         self._track_mode = track_mode
+        self._anti_interference = bool(anti_interference)
+        self._projectile = bool(projectile)
+        self._tracking_target = TrackingTarget(tracking_target)
 
     def cancel(self) -> None:
         self._token.cancel()
@@ -136,6 +145,9 @@ class TrackWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
+            from ai.sam_runtime import prepare_inference_thread
+
+            prepare_inference_thread()
             info = load_video(self._path)
             tracker = self._tracker
             stride = 1
@@ -148,7 +160,15 @@ class TrackWorker(QObject):
                 predictor = SamRuntime.instance().predictor_for(spec)
                 tracker = Sam2Tracker(predictor=predictor, spec=spec)
 
+            last_emit = 0.0
+
             def on_progress(event: ProgressEvent) -> None:
+                nonlocal last_emit
+                now = time.monotonic()
+                done = event.total > 0 and event.current >= event.total
+                if event.current > 2 and not done and now - last_emit < 0.2:
+                    return
+                last_emit = now
                 self.progress.emit(event)
 
             result = tracker.track(
@@ -161,6 +181,8 @@ class TrackWorker(QObject):
                 prompts=self._prompts,
                 stride=stride,
                 image_size=image_size,
+                anti_interference=self._anti_interference,
+                projectile=self._projectile,
             )
             result.track_id = self.track_id  # type: ignore[attr-defined]
             self.finished.emit(result)
@@ -169,15 +191,26 @@ class TrackWorker(QObject):
 
 
 class ShakeWorker(QObject):
-    """Four-corner shake estimate. Dedicated thread, never FramePump."""
+    """Conservative background-motion estimate. Dedicated thread, never FramePump."""
 
     progress = Signal(object)
     finished = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, video_path: Path, parent=None) -> None:  # noqa: ANN001
+    def __init__(
+        self,
+        video_path: Path,
+        parent=None,  # noqa: ANN001
+        *,
+        start_frame: int = 0,
+        end_frame: int | None = None,
+        exclude_by_frame: dict[int, list[tuple[float, float]]] | None = None,
+    ) -> None:
         super().__init__(parent)
         self._path = Path(video_path)
+        self._start_frame = start_frame
+        self._end_frame = end_frame
+        self._exclude_by_frame = exclude_by_frame or {}
         self._token = CancelToken()
 
     def cancel(self) -> None:
@@ -190,7 +223,14 @@ class ShakeWorker(QObject):
             def on_progress(event: ProgressEvent) -> None:
                 self.progress.emit(event)
 
-            result = estimate_shake(info, cancel=self._token, progress=on_progress)
+            result = estimate_shake(
+                info,
+                cancel=self._token,
+                progress=on_progress,
+                start_frame=self._start_frame,
+                end_frame=self._end_frame,
+                exclude_by_frame=self._exclude_by_frame,
+            )
             self.finished.emit(result)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
@@ -248,7 +288,10 @@ def run_track_in_thread(
     prompts: list[TrackPrompt] | None = None,
     tracker=None,  # noqa: ANN001
     track_mode: TrackMode = TrackMode.PRECISE,
+    anti_interference: bool = True,
+    tracking_target: TrackingTarget = TrackingTarget.OBJECT_CENTER,
     thread: QThread | None = None,
+    projectile: bool = False,
 ) -> tuple[QThread, TrackWorker]:
     """Spawn or queue a track job. Never reuse FramePump's thread."""
     worker = TrackWorker(
@@ -260,6 +303,9 @@ def run_track_in_thread(
         prompts=prompts,
         tracker=tracker,
         track_mode=track_mode,
+        anti_interference=anti_interference,
+        tracking_target=tracking_target,
+        projectile=projectile,
     )
     owned = thread is None
     if thread is None:
@@ -287,10 +333,18 @@ def run_shake_in_thread(
     on_progress: ProgressHandler | None = None,
     on_finished: Callable[[ShakeCompensation], None] | None = None,
     on_failed: Callable[[str], None] | None = None,
+    start_frame: int = 0,
+    end_frame: int | None = None,
+    exclude_by_frame: dict[int, list[tuple[float, float]]] | None = None,
 ) -> tuple[QThread, ShakeWorker]:
-    """Spawn a dedicated QThread for corner-anchor shake compensation."""
+    """Spawn a dedicated QThread for conservative background compensation."""
     thread = QThread()
-    worker = ShakeWorker(video_path)
+    worker = ShakeWorker(
+        video_path,
+        start_frame=start_frame,
+        end_frame=end_frame,
+        exclude_by_frame=exclude_by_frame,
+    )
     worker.moveToThread(thread)
     thread.started.connect(worker.run)
     if on_progress:
@@ -439,6 +493,9 @@ def apply_manual_override(
         visible=True,
         confidence=1.0,
         manual=True,
+        status=TrackPointStatus.TRUSTED,
+        source=TrackPointSource.MANUAL,
+        diagnostics={"manual_override": True},
     )
     for i, existing in enumerate(points):
         if existing.frame == frame:
@@ -455,6 +512,7 @@ def apply_manual_override(
         model_name=result.model_name,
         model_version=result.model_version,
         elapsed_s=result.elapsed_s,
+        quality_version=result.quality_version,
     )
 
 
@@ -595,6 +653,10 @@ def build_assistant_report(assistant: AssistantState, *, stale: bool = False) ->
     )
 
 
+def _opt(value: float | None, digits: int = 4) -> str:
+    return "" if value is None else f"{value:.{digits}f}"
+
+
 def export_track_csv(
     path: Path,
     result: TrackResult,
@@ -602,21 +664,27 @@ def export_track_csv(
     *,
     calibration: CalibrationState | None = None,
     velocity_step: int | None = None,
+    velocity_mode: str | None = None,
     depth_audit: DepthAuditState | None = None,
+    derivative_model: str | None = None,
 ) -> None:
     samples = series_for_result(
         result,
         info,
         calibration=calibration,
         velocity_step=DEFAULT_VELOCITY_STEP if velocity_step is None else velocity_step,
+        velocity_mode=DEFAULT_VELOCITY_MODE if velocity_mode is None else velocity_mode,
         depth_audit=depth_audit,
+        derivative_model=derivative_model or "off",
     )
     unit = samples[0].position_unit if samples else ("m" if calibration and calibration.active else "px")
     speed = samples[0].speed_unit if samples else ("m/s" if unit == "m" else "px/s")
     pos_key = "m" if unit == "m" else "px"
     spd_key = "m_s" if unit == "m" else "px_s"
-    with Path(path).open("w", encoding="utf-8", newline="") as fh:
+    points_by_frame = {point.frame: point for point in result.points}
+    with Path(path).open("w", encoding="utf-8-sig", newline="") as fh:
         writer = csv.writer(fh)
+        acc_key = "m_s2" if unit == "m" else "px_s2"
         writer.writerow(
             [
                 "frame",
@@ -628,14 +696,48 @@ def export_track_csv(
                 f"v_{spd_key}",
                 "visible",
                 "confidence",
+                "tracking_status",
+                "tracking_source",
+                "quality_version",
+                "raw_object_score",
+                "raw_iou",
+                "appearance_similarity",
+                "forward_backward_error_px",
+                "motion_score",
+                "area_ratio",
+                "memory_admitted",
                 "sigma_x",
                 "sigma_y",
                 "quality",
                 "off_plane_m",
                 "source",
+                f"ax_{acc_key}",
+                f"ay_{acc_key}",
+                f"sigma_vx_{spd_key}",
+                f"sigma_vy_{spd_key}",
+                f"sigma_ax_{acc_key}",
+                f"sigma_ay_{acc_key}",
+                "window_v_s",
+                "window_a_s",
+                "kinematics_source",
+                f"vx_local_{spd_key}",
+                f"vy_local_{spd_key}",
+                f"ax_local_{acc_key}",
+                f"ay_local_{acc_key}",
             ]
         )
         for sample in samples:
+            point = points_by_frame.get(sample.frame)
+            diagnostics = {} if point is None else point.diagnostics
+            def _diag(name: str) -> str:
+                value = diagnostics.get(name)
+                if value is None:
+                    return ""
+                if isinstance(value, bool):
+                    return "1" if value else "0"
+                if isinstance(value, float):
+                    return f"{value:.6f}"
+                return str(value)
             writer.writerow(
                 [
                     sample.frame,
@@ -647,11 +749,34 @@ def export_track_csv(
                     "" if sample.speed is None else f"{sample.speed:.4f}",
                     int(sample.visible),
                     f"{sample.confidence:.4f}",
+                    "" if point is None else point.status.value,
+                    "" if point is None else point.source.value,
+                    result.quality_version,
+                    _diag("raw_object_score"),
+                    _diag("raw_iou"),
+                    _diag("appearance"),
+                    _diag("forward_backward_error_px"),
+                    _diag("motion"),
+                    _diag("area_ratio"),
+                    _diag("memory_admitted"),
                     "" if sample.sigma_x is None else f"{sample.sigma_x:.6f}",
                     "" if sample.sigma_y is None else f"{sample.sigma_y:.6f}",
                     quality_label(sample),
                     "" if sample.off_plane_m is None else f"{sample.off_plane_m:.6f}",
                     sample.source,
+                    "" if sample.ax is None else f"{sample.ax:.4f}",
+                    "" if sample.ay is None else f"{sample.ay:.4f}",
+                    _opt(sample.sigma_vx),
+                    _opt(sample.sigma_vy),
+                    _opt(sample.sigma_ax),
+                    _opt(sample.sigma_ay),
+                    _opt(sample.window_v_s, 3),
+                    _opt(sample.window_a_s, 3),
+                    "" if sample.x is None else sample.kinematics_source,
+                    _opt(sample.local_vx),
+                    _opt(sample.local_vy),
+                    _opt(sample.local_ax),
+                    _opt(sample.local_ay),
                 ]
             )
 

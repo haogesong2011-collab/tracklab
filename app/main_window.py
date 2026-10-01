@@ -7,17 +7,29 @@ from pathlib import Path
 
 from datetime import datetime
 
-from PySide6.QtCore import QByteArray, QEvent, QSettings, QThread, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QDragEnterEvent, QDropEvent, QImage, QKeySequence
+from PySide6.QtCore import QByteArray, QEvent, QSettings, Qt, QThread, QTimer, QUrl
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QDesktopServices,
+    QDragEnterEvent,
+    QDropEvent,
+    QImage,
+    QKeySequence,
+    QShowEvent,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QFrame,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -42,11 +54,14 @@ from app.assistant_panel import (
 from app.calibration_dialog import CalibrationDialog, CameraCalibDialog
 from app.dock_workspace import DockWorkspace, _on_screen
 from app.frame_pump import FramePump
+from app.help_text import HELP_SECTIONS
 from app.track_panels import TrackDataPanel, TrackListPanel
 from app.track_window import TrackManagerWindow
 from app.data_views import TrackChartPanel
 from app.download_toast import DownloadToast
-from app.paths import frozen_app_bundle, style_path
+from app.paths import frozen_app_bundle
+from app.theme import apply_palette, preference, set_preference, stylesheet, sync_system
+from app.self_update import update_log_path
 from app.update_checker import (
     SETTINGS_AUTO_CHECK,
     SETTINGS_LAST_CHECK,
@@ -56,6 +71,11 @@ from app.update_checker import (
     should_auto_check,
     status_bar_message,
     update_checks_allowed,
+)
+from app.tutorial import (
+    maybe_start_tutorial,
+    tutorial_auto_start_allowed,
+    tutorial_seen,
 )
 from app.update_dialog import (
     open_release_page,
@@ -73,6 +93,8 @@ from app.widgets import (
     DropHint,
     OverlayTrack,
     StepStepper,
+    clip_index,
+    object_follow_box,
     TimelineSlider,
     VideoInfoLabel,
     VideoStage,
@@ -115,8 +137,10 @@ from ai.contracts import (
     TrackMode,
     TrackPrompt,
     TrackResult,
+    TrackingTarget,
 )
 from ai.deepseek_client import DEFAULT_CHAT_MODEL, DEFAULT_REPORT_MODEL
+from ai.fit_suggestions import FitSuggestion, accept_all, accept_suggestion, suggest_points
 from ai.desktop import (
     apply_manual_override,
     build_assistant_report,
@@ -131,8 +155,15 @@ from ai.desktop import (
     write_track_project,
 )
 from ai.depth_audit import DepthAuditState
-from ai.kinematics import sample_at_frame, series_for_result
-from ai.physics import source_fingerprint
+from ai.kinematics import (
+    FIT_OFF,
+    attach_model_velocity,
+    sample_at_frame,
+    series_for_result,
+    time_s_for_frame,
+    trajectory_curves,
+)
+from ai.physics import projectile_velocity_model, source_fingerprint
 from ai.model_manager import spec_for_mode
 from ai.sam2_tracker import merge_track_points
 from ai.schema import Point2D
@@ -155,8 +186,8 @@ VIDEO_SUFFIXES = {
     ".mpg",
     ".mpeg",
 }
-STYLE_PATH = style_path()
 SHAKE_INVALIDATE_PX = 8.0
+ASSISTANT_ENABLED = False
 
 
 class MainWindow(QMainWindow):
@@ -166,7 +197,13 @@ class MainWindow(QMainWindow):
         self.resize(1280, 800)
         self.setMinimumSize(900, 560)
         self.setAcceptDrops(True)
-        self.setStyleSheet(STYLE_PATH.read_text(encoding="utf-8"))
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            set_preference("system")
+        else:
+            saved = str(QSettings().value("ui/appearance", "system") or "system")
+            set_preference(saved)
+        self.setStyleSheet(stylesheet())
+        apply_palette(QApplication.instance())
 
         self._info: VideoInfo | None = None
         self._index = 0
@@ -180,6 +217,16 @@ class MainWindow(QMainWindow):
         self._ai_worker = None
         self._sam_thread: QThread | None = None
         self._track_mode = TrackMode.PRECISE
+        self._default_tracking_target = TrackingTarget.OBJECT_CENTER
+        self._anti_interference = True
+        self._projectile = False
+        self._show_fit_suggestions = True
+        self._fit_cache: dict[str, tuple[int, dict[int, FitSuggestion]]] = {}
+        self._fit_dismissed: dict[str, set[int]] = {}
+        # Guided review of predicted points: the frame in manual-pick mode,
+        # and a just-finished action to confirm on the card.
+        self._manual_pick_frame: int | None = None
+        self._fit_done: tuple[int, str] | None = None
         self._shake_thread = None
         self._shake_worker = None
         self._shake: ShakeCompensation | None = None
@@ -222,6 +269,12 @@ class MainWindow(QMainWindow):
         self._self_update_thread = None
         self._self_update_worker = None
         self._applying_update = False
+        self._toolbar_buttons: dict[str, QToolButton] = {}
+        self._transport: QWidget | None = None
+        self._tutorial_overlay = None
+        self._tutorial_scheduled = False
+        self._defer_update_for_tutorial = False
+        self._update_startup_timer: QTimer | None = None
 
         self._video = VideoView()
         self._hint = DropHint()
@@ -238,7 +291,14 @@ class MainWindow(QMainWindow):
         self._video.axis_dragged.connect(self._on_axis_dragged)
         self._video.axis_drag_finished.connect(self._on_axis_drag_finished)
         self._video.axis_edit_requested.connect(self._start_axis_tool)
+        self._video.axis_delete_requested.connect(self._clear_axes)
         self._video.interaction_cancelled.connect(self._on_interaction_cancelled)
+        self._video.manual_pick_cancelled.connect(self._cancel_manual_fit_pick)
+        self._video.manual_pick_needs_shift.connect(self._remind_manual_shift)
+        self._video.fit_card.keep_requested.connect(self._accept_fit_here)
+        self._video.fit_card.manual_requested.connect(self._start_manual_fit_pick)
+        self._video.fit_card.cancel_requested.connect(self._cancel_manual_fit_pick)
+        self._video.fit_card.next_requested.connect(self._jump_to_next_fit)
 
         self._list_panel = TrackListPanel()
         self._list_panel.new_requested.connect(self._new_track)
@@ -261,9 +321,13 @@ class MainWindow(QMainWindow):
 
         self._data_panel = TrackDataPanel()
         self._data_panel.frame_activated.connect(self._show_frame)
+        self._data_panel.export_requested.connect(self._export_csv)
         self._chart_panel = TrackChartPanel()
         self._chart_panel.frame_activated.connect(self._on_chart_frame_activated)
         self._chart_panel.velocity_step_changed.connect(self._refresh_track_ui)
+        self._chart_panel.fit_model_changed.connect(self._sync_video_fit)
+        self._chart_panel.fit_model_changed.connect(lambda _model: self._refresh_track_ui())
+        self._chart_panel.derivative_source_changed.connect(self._refresh_track_ui)
         self._assistant_panel = AssistantPanel()
         self._assistant_panel.analyze_requested.connect(self._analyze_experiment)
         self._assistant_panel.confirm_requested.connect(self._confirm_experiment)
@@ -344,7 +408,9 @@ class MainWindow(QMainWindow):
         self._loop_btn.setIconSize(icon_size())
         self._loop_btn.setCheckable(True)
         self._loop_btn.setEnabled(False)
-        self._loop_btn.setToolTip("在标记范围内循环播放（拖动进度条上方的三角调整范围）")
+        self._loop_btn.setToolTip(
+            "播到分析区间终点后回到起点。区间由进度条上方的两个三角决定，播放头不能出这个区间。"
+        )
         self._loop_btn.toggled.connect(self._on_loop_toggled)
 
         toolbar_shell = QWidget()
@@ -358,6 +424,7 @@ class MainWindow(QMainWindow):
 
         transport = QWidget()
         transport.setObjectName("transportBar")
+        self._transport = transport
         transport.setFixedHeight(56)
         controls = QHBoxLayout(transport)
         controls.setContentsMargins(16, 6, 14, 6)
@@ -400,11 +467,58 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._restore_window_prefs()
         self._refresh_track_ui()
-        if update_checks_allowed():
-            self._update_startup_timer = QTimer(self)
-            self._update_startup_timer.setSingleShot(True)
-            self._update_startup_timer.timeout.connect(self._maybe_auto_check_updates)
-            self._update_startup_timer.start(2500)
+        self._defer_update_for_tutorial = (
+            tutorial_auto_start_allowed() and not tutorial_seen()
+        )
+        if update_checks_allowed() and not self._defer_update_for_tutorial:
+            self._start_deferred_update_check(immediate=True)
+        app = QApplication.instance()
+        if app is not None:
+            app.styleHints().colorSchemeChanged.connect(self._on_system_scheme)
+        self._refresh_theme()
+
+    def _on_system_scheme(self, *_args) -> None:
+        if preference() != "system":
+            return
+        sync_system()
+        self._refresh_theme()
+
+    def _on_appearance_chosen(self, action: QAction) -> None:
+        key = str(action.data() or "system")
+        set_preference(key)
+        if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+            QSettings().setValue("ui/appearance", key)
+        self._refresh_theme()
+
+    def _refresh_theme(self) -> None:
+        sheet = stylesheet()
+        apply_palette(QApplication.instance())
+        self.setStyleSheet(sheet)
+        self._assistant_window.setStyleSheet(sheet)
+        if self._download_toast is not None:
+            self._download_toast.setStyleSheet(sheet)
+        overlay = self._tutorial_overlay
+        if overlay is not None:
+            overlay.setStyleSheet(sheet)
+            overlay.update()
+        self._chart_panel.apply_theme()
+        self._video.update()
+        self._hint.update()
+        self._stage.update()
+        self._slider.update()
+        self._view_bar.apply_theme()
+        self._cal_dialog.apply_theme()
+        self._camera_dialog.apply_theme()
+        self._assistant_panel.apply_theme()
+        self._prev_btn.setIcon(prev_icon())
+        self._loop_btn.setIcon(loop_icon())
+        self._stepper.apply_theme()
+        self._set_play_icon(self._playing)
+        for name, button in self._toolbar_buttons.items():
+            button.setIcon(toolbar_icon(name))
+        cache = self.findChild(QToolButton, "toolCache")
+        if cache is not None:
+            cache.setIcon(toolbar_icon("cache"))
 
     def _icon_button(self, icon, tooltip: str, slot) -> QPushButton:
         button = QPushButton()
@@ -447,7 +561,7 @@ class MainWindow(QMainWindow):
                 layout.addWidget(divider)
                 layout.addSpacing(4)
             button = QToolButton()
-            button.setObjectName("toolButton")
+            button.setObjectName("tool" + name[:1].upper() + name[1:])
             button.setIcon(toolbar_icon(name))
             button.setIconSize(icon_size())
             button.setToolTip(tooltip)
@@ -459,6 +573,7 @@ class MainWindow(QMainWindow):
                 self._ruler_btn = button
             elif name == "axis":
                 self._axis_btn = button
+            self._toolbar_buttons[name] = button
             layout.addWidget(button)
             if name == "zoom":
                 layout.addWidget(self._zoom_readout)
@@ -467,7 +582,7 @@ class MainWindow(QMainWindow):
         self._video_info = VideoInfoLabel()
         layout.addWidget(self._video_info, stretch=1)
         cache_btn = QToolButton()
-        cache_btn.setObjectName("toolButton")
+        cache_btn.setObjectName("toolCache")
         cache_btn.setIcon(toolbar_icon("cache"))
         cache_btn.setIconSize(icon_size())
         cache_btn.setToolTip("清理缓存")
@@ -539,13 +654,13 @@ class MainWindow(QMainWindow):
         play_menu.addAction(next_action)
         play_menu.addSeparator()
 
-        mark_in = QAction("循环起点设为当前帧", self)
+        mark_in = QAction("分析区间起点设为当前帧", self)
         mark_in.setShortcut(Qt.Key.Key_I)
         mark_in.triggered.connect(lambda: self._mark_loop("start"))
-        mark_out = QAction("循环终点设为当前帧", self)
+        mark_out = QAction("分析区间终点设为当前帧", self)
         mark_out.setShortcut(Qt.Key.Key_O)
         mark_out.triggered.connect(lambda: self._mark_loop("end"))
-        reset_loop = QAction("循环范围恢复整段", self)
+        reset_loop = QAction("分析区间恢复整段", self)
         reset_loop.triggered.connect(self._reset_loop_range)
         play_menu.addAction(mark_in)
         play_menu.addAction(mark_out)
@@ -577,6 +692,49 @@ class MainWindow(QMainWindow):
         track_menu.addSeparator()
         track_menu.addAction(self._fast_track_action)
         track_menu.addAction(self._precise_track_action)
+        self._anti_interference_action = QAction("抗干扰（背景相减 + 运动预测）", self)
+        self._anti_interference_action.setCheckable(True)
+        self._anti_interference_action.setChecked(True)
+        self._anti_interference_action.setToolTip(
+            "掩膜跳到条纹或树叶上时拒收这一帧，并在预测位置附近把球找回来。"
+        )
+        self._anti_interference_action.toggled.connect(self._set_anti_interference)
+        track_menu.addAction(self._anti_interference_action)
+        self._projectile_action = QAction("抛体运动（偏离抛物线即复核）", self)
+        self._projectile_action.setCheckable(True)
+        self._projectile_action.setChecked(False)
+        self._projectile_action.setToolTip(
+            "物体在空中自由飞行时打开：明显偏离局部抛物线的点一律送去复核。"
+            "有碰撞、摆动或人为推动时请关闭。"
+        )
+        self._projectile_action.toggled.connect(self._set_projectile)
+        track_menu.addAction(self._projectile_action)
+        track_menu.addSeparator()
+        self._fit_show_action = QAction("显示拟合建议点", self)
+        self._fit_show_action.setCheckable(True)
+        self._fit_show_action.setChecked(True)
+        self._fit_show_action.setToolTip(
+            "待复核或丢失的帧，用前后可信点的局部抛物线算出建议位置，画成黄色点（当前帧是闪烁的黄色圈）。"
+            "只是建议，采用后才计入数据。"
+        )
+        self._fit_show_action.toggled.connect(self._set_show_fit_suggestions)
+        track_menu.addAction(self._fit_show_action)
+        self._fit_accept_action = QAction("采用当前帧拟合建议点", self)
+        self._fit_accept_action.setShortcut(Qt.Key.Key_F)
+        self._fit_accept_action.triggered.connect(self._accept_fit_here)
+        track_menu.addAction(self._fit_accept_action)
+        self._fit_dismiss_action = QAction("舍弃当前帧拟合建议点", self)
+        self._fit_dismiss_action.setShortcut(QKeySequence("Shift+F"))
+        self._fit_dismiss_action.triggered.connect(self._dismiss_fit_here)
+        track_menu.addAction(self._fit_dismiss_action)
+        fit_all = track_menu.addAction("采用全部拟合建议点…")
+        fit_all.triggered.connect(self._accept_all_fits)
+        fit_next = track_menu.addAction("跳到下一个拟合建议点")
+        fit_next.setShortcut(QKeySequence("Ctrl+F"))
+        fit_next.triggered.connect(self._jump_to_next_fit)
+        track_menu.addSeparator()
+        review_jump = track_menu.addAction("跳到首个待复核点")
+        review_jump.triggered.connect(self._jump_to_first_review)
         new_track = track_menu.addAction("新建轨迹")
         new_track.triggered.connect(self._new_track)
         mgr = track_menu.addAction("轨迹管理器")
@@ -588,6 +746,19 @@ class MainWindow(QMainWindow):
         track_menu.addAction(self._shake_action)
 
         view_menu = self.menuBar().addMenu("显示")
+        appearance = view_menu.addMenu("外观")
+        appearance_group = QActionGroup(self)
+        appearance_group.setExclusive(True)
+        current_appearance = preference()
+        for key, label in (("system", "跟随系统"), ("light", "浅色"), ("dark", "深色")):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(key == current_appearance)
+            action.setData(key)
+            appearance_group.addAction(action)
+            appearance.addAction(action)
+        appearance_group.triggered.connect(self._on_appearance_chosen)
+        view_menu.addSeparator()
         self._contour_action = QAction("显示分割轮廓", self)
         self._contour_action.setCheckable(True)
         self._contour_action.setChecked(True)
@@ -600,6 +771,11 @@ class MainWindow(QMainWindow):
         self._shake_apply_action.setCheckable(True)
         self._shake_apply_action.setChecked(True)
         self._shake_apply_action.toggled.connect(self._on_shake_apply_toggled)
+        self._fit_curve_action = QAction("在视频上显示拟合曲线", self)
+        self._fit_curve_action.setCheckable(True)
+        self._fit_curve_action.setChecked(False)
+        self._fit_curve_action.setToolTip("分图「函数」拟合出的轨迹，以淡色点线画在视频上，默认不显示。")
+        self._fit_curve_action.toggled.connect(lambda _checked: self._sync_video_fit())
         self._anchor_action = QAction("显示四角参照点", self)
         self._anchor_action.setCheckable(True)
         self._anchor_action.setChecked(True)
@@ -609,6 +785,7 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         view_menu.addAction(self._shake_apply_action)
         view_menu.addAction(self._anchor_action)
+        view_menu.addAction(self._fit_curve_action)
 
         for title, items in (
             ("坐标系", []),
@@ -626,6 +803,8 @@ class MainWindow(QMainWindow):
                 set_origin.triggered.connect(self._start_origin_only)
                 set_axis = menu.addAction("设置坐标轴")
                 set_axis.triggered.connect(self._start_axis_direction)
+                clear_axis = menu.addAction("删除坐标轴")
+                clear_axis.triggered.connect(self._clear_axes)
                 menu.addSeparator()
                 self._cal_overlay_action = QAction("显示标定叠加", self)
                 self._cal_overlay_action.setCheckable(True)
@@ -679,6 +858,8 @@ class MainWindow(QMainWindow):
                 restore = menu.addAction("恢复默认布局")
                 restore.triggered.connect(self._restore_layout)
             elif title == "帮助":
+                guide = menu.addAction("使用说明")
+                guide.triggered.connect(self._show_help)
                 start = menu.addAction("快速开始")
                 start.triggered.connect(self._show_quick_start)
                 keys = menu.addAction("快捷键")
@@ -722,7 +903,32 @@ class MainWindow(QMainWindow):
             self._cal_dialog.hide()
         if getattr(self, "_camera_dialog", None) is not None:
             self._camera_dialog.hide()
+        if self._tutorial_overlay is not None:
+            self._tutorial_overlay.discard()
+            self._tutorial_overlay = None
         super().closeEvent(event)
+
+    def _start_deferred_update_check(self, *, immediate: bool = False) -> None:
+        if not update_checks_allowed():
+            return
+        if not immediate:
+            if not self._defer_update_for_tutorial:
+                return
+            self._defer_update_for_tutorial = False
+        if self._update_startup_timer is None:
+            self._update_startup_timer = QTimer(self)
+            self._update_startup_timer.setSingleShot(True)
+            self._update_startup_timer.timeout.connect(self._maybe_auto_check_updates)
+        self._update_startup_timer.start(2500)
+
+    def _maybe_auto_start_tutorial(self) -> None:
+        started = maybe_start_tutorial(self)
+        if not started:
+            self._start_deferred_update_check()
+
+    def _on_tutorial_finished(self) -> None:
+        self._tutorial_overlay = None
+        self._start_deferred_update_check()
 
     def _auto_check_enabled(self) -> bool:
         value = QSettings().value(SETTINGS_AUTO_CHECK, True)
@@ -839,13 +1045,19 @@ class MainWindow(QMainWindow):
             thread.wait(2000)
 
     def _on_self_update_ready(self, new_app) -> None:  # noqa: ANN001
+        from PySide6.QtWidgets import QApplication
+
         from app.self_update import launch_replacer
 
         toast = self._download_toast
         if toast is not None:
-            toast.set_finished("即将重启并完成安装")
+            toast.set_finished("即将退出并完成安装")
+        thread = self._self_update_thread
         self._self_update_thread = None
         self._self_update_worker = None
+        if thread is not None:
+            thread.quit()
+            thread.wait(15000)
         bundle = frozen_app_bundle()
         if bundle is None:
             self._hide_download_toast()
@@ -858,7 +1070,11 @@ class MainWindow(QMainWindow):
         )
         self._applying_update = True
         launch_replacer(pid=os.getpid(), bundle=bundle, new_app=Path(new_app))
-        QTimer.singleShot(200, self.close)
+        app = QApplication.instance()
+        if app is not None:
+            QTimer.singleShot(400, app.quit)
+        else:
+            QTimer.singleShot(400, self.close)
 
     def _on_self_update_failed(self, message: str) -> None:
         self._self_update_thread = None
@@ -878,17 +1094,56 @@ class MainWindow(QMainWindow):
             self._download_toast.hide()
 
     def _show_quick_start(self) -> None:
-        QMessageBox.information(
-            self,
-            "快速开始",
-            "1. 打开或拖入视频（mp4 / mov 等）。\n"
-            "2. 新建轨迹，框选或点击目标。快速用 Tiny 隔帧，精准用 Small 逐帧。\n"
-            "3. 用坐标系菜单设置标定尺或运动平面。\n"
-            "4. 在数据表和分图中查看结果，需要时导出 CSV / JSON。\n\n"
-            "标准安装包捆绑 Tiny 权重；精准 Small 首次使用时下载。\n"
-            "安装包可在帮助菜单检查更新；点「立即更新」会下载并替换当前应用。\n"
-            "AI 离面抽检需从源码安装完整依赖。",
-        )
+        maybe_start_tutorial(self, force=True)
+
+    def _show_help(self) -> None:
+        dialog = QDialog(self)
+        dialog.setObjectName("helpDialog")
+        dialog.setWindowTitle("使用说明")
+        dialog.resize(460, 560)
+        dialog.setMinimumWidth(400)
+
+        body = QWidget()
+        body.setObjectName("helpBody")
+        column = QVBoxLayout(body)
+        column.setContentsMargins(8, 4, 8, 8)
+        column.setSpacing(0)
+        lead = QLabel("用的时候拿不准，可以先看这里。")
+        lead.setObjectName("helpLead")
+        lead.setWordWrap(True)
+        column.addWidget(lead)
+        for title, text in HELP_SECTIONS:
+            heading = QLabel(title)
+            heading.setObjectName("helpHeading")
+            copy = QLabel(text)
+            copy.setObjectName("helpCopy")
+            copy.setWordWrap(True)
+            copy.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            column.addSpacing(16)
+            column.addWidget(heading)
+            column.addSpacing(6)
+            column.addWidget(copy)
+        column.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("helpScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(body)
+
+        close = QPushButton("关闭")
+        close.setObjectName("helpClose")
+        close.clicked.connect(dialog.accept)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(close)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 16, 18, 14)
+        layout.setSpacing(12)
+        layout.addWidget(scroll, stretch=1)
+        layout.addLayout(buttons)
+        dialog.exec()
 
     def _show_shortcuts(self) -> None:
         QMessageBox.information(
@@ -897,32 +1152,76 @@ class MainWindow(QMainWindow):
             "空格：播放 / 暂停\n"
             "T：开始或取消自动跟踪\n"
             "左右方向键：按底栏步长逐帧移动\n"
-            "I / O：设置循环起点 / 终点\n"
-            "点击画面：正点选；Shift+点击：负点；拖动：框选",
+            "I / O：设置分析区间的起点 / 终点\n"
+            "Control 拖动：框选目标\n"
+            "Shift+左键（或 Shift+Control）点击：加点，或修正当前帧",
         )
 
     def _show_about(self) -> None:
-        QMessageBox.about(
-            self,
-            "关于 TrackLab",
+        checked = self._last_update_check_label()
+        box = QMessageBox(self)
+        box.setWindowTitle("关于 TrackLab")
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(
             f"TrackLab {__version__}\n\n"
             "物理视频分析工具。快速 Tiny 随安装包提供，精准 Small 首次使用时下载。"
             "含手工平面测量。安装包可在应用内检查并安装更新。\n"
             "AI 离面抽检仍为可选能力。\n\n"
-            f"项目主页：https://github.com/{GITHUB_REPO}",
+            f"上次检查更新：{checked}\n"
+            f"项目主页：https://github.com/{GITHUB_REPO}"
         )
+        log_button = box.addButton("打开更新日志", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Ok)
+        box.exec()
+        if box.clickedButton() is log_button:
+            self._open_update_log()
+
+    def _last_update_check_label(self) -> str:
+        try:
+            stamp = float(QSettings().value(SETTINGS_LAST_CHECK, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            stamp = 0.0
+        if stamp <= 0:
+            return "尚未检查"
+        return datetime.fromtimestamp(stamp).strftime("%Y-%m-%d %H:%M")
+
+    def _open_update_log(self) -> None:
+        path = update_log_path()
+        if not path.is_file():
+            QMessageBox.information(
+                self,
+                "更新日志",
+                "还没有更新日志。安装包里执行过更新后才会写入。",
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._tutorial_scheduled:
+            return
+        self._tutorial_scheduled = True
+        if self._defer_update_for_tutorial:
+            QTimer.singleShot(400, self._maybe_auto_start_tutorial)
 
     def resizeEvent(self, event) -> None:  # noqa: ANN001
         super().resizeEvent(event)
         self._reposition_download_toast()
+        self._reposition_tutorial()
 
     def moveEvent(self, event) -> None:  # noqa: ANN001
         super().moveEvent(event)
         self._reposition_download_toast()
+        self._reposition_tutorial()
 
     def _reposition_download_toast(self) -> None:
         if self._download_toast is not None and self._download_toast.isVisible():
             self._download_toast.reposition()
+
+    def _reposition_tutorial(self) -> None:
+        overlay = self._tutorial_overlay
+        if overlay is not None and overlay.isVisible():
+            overlay.reposition()
 
     def changeEvent(self, event) -> None:  # noqa: ANN001
         super().changeEvent(event)
@@ -1161,6 +1460,8 @@ class MainWindow(QMainWindow):
             return
         start, end = self._play_bounds()
         self._playing = True
+        self._end_manual_fit_pick()
+        self._video.fit_card.dismiss()
         self._set_play_icon(True)
         self._deadline = time.perf_counter()
         if self._index >= end:
@@ -1169,10 +1470,13 @@ class MainWindow(QMainWindow):
             self._schedule_next_frame()
 
     def _pause(self) -> None:
+        was_playing = self._playing
         self._playing = False
         self._pending_play_index = None
         self._timer.stop()
         self._set_play_icon(False)
+        if was_playing and self._info is not None:
+            self._apply_track_overlay()  # bring back the prediction card, if any
 
     def _jump_start(self) -> None:
         if self._info is None:
@@ -1186,13 +1490,17 @@ class MainWindow(QMainWindow):
         self._pause()
         self._show_frame(self._index + delta)
 
-    def _play_bounds(self) -> tuple[int, int]:
+    def _analysis_bounds(self) -> tuple[int, int]:
         assert self._info is not None
-        if self._loop_btn.isChecked():
-            start, end = self._slider.loop_range()
-            if end > start:
-                return start, end
-        return 0, self._info.frame_count - 1
+        last = self._info.frame_count - 1
+        start, end = self._slider.loop_range()
+        return clip_index(start, 0, last), clip_index(end, 0, last)
+
+    def _play_bounds(self) -> tuple[int, int]:
+        start, end = self._analysis_bounds()
+        if end < start:
+            return end, start
+        return start, end
 
     def _schedule_next_frame(self) -> None:
         assert self._info is not None
@@ -1232,21 +1540,30 @@ class MainWindow(QMainWindow):
     def _on_loop_toggled(self, enabled: bool) -> None:
         if self._info is None:
             return
+        start, end = self._play_bounds()
         if enabled:
-            start, end = self._slider.loop_range()
             self.statusBar().showMessage(
-                f"循环播放：帧 {start + 1} – {end + 1}（拖动进度条上方三角调整，I / O 设为当前帧）",
+                f"循环播放：帧 {start + 1} – {end + 1}。播到终点后回到起点。",
                 6000,
             )
-            if not start <= self._index <= end:
-                self._show_frame(start)
         else:
-            self.statusBar().showMessage("循环播放已关闭", 3000)
+            self.statusBar().showMessage(
+                f"分析区间：帧 {start + 1} – {end + 1}。播到终点会停，播放头不会出这个区间。",
+                6000,
+            )
+        if not start <= self._index <= end:
+            self._show_frame(start if self._index < start else end)
 
     def _on_loop_range_changed(self, start: int, end: int) -> None:
         if self._info is None:
             return
-        self.statusBar().showMessage(f"循环范围：帧 {start + 1} – {end + 1}", 3000)
+        start, end = self._play_bounds()
+        self.statusBar().showMessage(
+            f"分析区间：帧 {start + 1} – {end + 1}。播放头不能出这个区间。",
+            4000,
+        )
+        if not start <= self._index <= end:
+            self._show_frame(start if self._index < start else end)
 
     def _mark_loop(self, which: str) -> None:
         if self._info is None:
@@ -1286,7 +1603,8 @@ class MainWindow(QMainWindow):
     def _show_frame(self, index: int) -> None:
         if self._info is None or self._pump is None:
             return
-        index = max(0, min(index, self._info.frame_count - 1))
+        start, end = self._play_bounds()
+        index = clip_index(index, start, end)
         self._index = index
         if self._slider.value() != index:
             self._slider.blockSignals(True)
@@ -1373,11 +1691,12 @@ class MainWindow(QMainWindow):
             name=f"轨迹 {index + 1}",
             color=TRACK_COLORS[index % len(TRACK_COLORS)],
             seed_frame=self._index,
+            tracking_target=self._default_tracking_target,
         )
         self._tracks.append(layer)
         self._active_id = layer.track_id
         self._refresh_track_ui()
-        self._list_panel.set_hint("Control 拖动框选目标，Shift+Control 点击加点")
+        self._list_panel.set_hint("Control 拖动框选目标，Shift+左键点击加点")
 
     def _delete_track(self) -> None:
         layer = self._active_layer()
@@ -1392,6 +1711,9 @@ class MainWindow(QMainWindow):
         if track_id == self._active_id:
             return
         self._active_id = track_id
+        layer = self._active_layer()
+        if layer is not None:
+            self._sync_tracking_target_actions(layer.tracking_target)
         self._refresh_track_ui()
 
     def _toggle_track_visible(self, track_id: str, visible: bool) -> None:
@@ -1523,10 +1845,14 @@ class MainWindow(QMainWindow):
         layer = self._active_layer()
         assert layer is not None
         if layer.result is not None and kind == "positive":
+            had_prediction = self._index in self._fit_suggestions(layer)
             layer.result = apply_manual_override(layer.result, self._index, Point2D(x, y))
             layer.prompts.append(
                 TrackPrompt(frame=self._index, kind=PromptKind.POSITIVE, x=x, y=y)
             )
+            if had_prediction or self._manual_pick_frame == self._index:
+                self._fit_done = (self._index, "已手动打点")
+            self._end_manual_fit_pick()
             self.statusBar().showMessage(
                 f"已修正第 {self._index + 1} 帧 → ({x:.1f}, {y:.1f})，可再按 T 从该帧重跟踪",
                 5000,
@@ -1565,7 +1891,8 @@ class MainWindow(QMainWindow):
         layer.seed_frame = self._index
         self._refresh_track_ui()
         self.statusBar().showMessage(
-            f"已添加框选 ({x0:.0f},{y0:.0f})–({x1:.0f},{y1:.0f})", 4000
+            "框住的是这一帧的物体，不是后面的搜索范围。跟踪后框会跟着物体走。",
+            5000,
         )
 
     def _start_or_cancel_ai_track(self, *_args) -> None:
@@ -1580,21 +1907,24 @@ class MainWindow(QMainWindow):
             layer = self._active_layer()
         assert layer is not None
         if not layer.prompts:
-            self._list_panel.set_hint("请先 Control 拖动框选目标，或 Shift+Control 点击加点")
+            self._list_panel.set_hint("请先 Control 拖动框选目标，或 Shift+左键点击加点")
             self.statusBar().showMessage("请先框选或加点，再开始跟踪", 5000)
             return
-        if not self._ensure_sam_runtime():
-            return
-        self._push_undo()
         seed_prompt = next(
             (p for p in reversed(layer.prompts) if p.kind != PromptKind.NEGATIVE),
             layer.prompts[-1],
         )
-        seed = (seed_prompt.x, seed_prompt.y)
+        if not self._ensure_sam_runtime():
+            return
+        self._pause()
+        self._push_undo()
+        seed = seed_prompt.center()
+        lo, hi = self._play_bounds()
         start = layer.seed_frame
         if layer.prompts:
-            start = layer.prompts[-1].frame
-        end = self._track_end_frame()
+            start = seed_prompt.frame
+        start = clip_index(start, lo, hi)
+        end = clip_index(self._track_end_frame(), start, hi)
         layer.status = "running"
         self._refresh_track_ui()
         self._stop_shake()
@@ -1610,11 +1940,14 @@ class MainWindow(QMainWindow):
             end_frame=end,
             prompts=layer.prompts,
             track_mode=self._track_mode,
+            anti_interference=self._anti_interference,
+            projectile=self._projectile,
+            tracking_target=layer.tracking_target,
             thread=thread,
         )
         self._ai_worker = worker
         self._cancel_ai_action.setEnabled(True)
-        self._ai_track_action.setText("取消 SAM 跟踪")
+        self._ai_track_action.setText("取消自动跟踪")
         self._list_panel.set_running(True)
         self._sync_undo_actions()
         kind = "快速Tiny" if self._track_mode is TrackMode.FAST else "精准Small"
@@ -1625,6 +1958,9 @@ class MainWindow(QMainWindow):
 
     def _ensure_sam_runtime(self) -> bool:
         """Prompt once for Apache-2.0 weights. Never silently fall back to color blobs."""
+        from ai.sam_runtime import reserve_system_headroom
+
+        reserve_system_headroom()
         try:
             import sam2  # noqa: F401
             import torch  # noqa: F401
@@ -1667,6 +2003,50 @@ class MainWindow(QMainWindow):
             self._start_checkpoint_download(spec)
             return False
 
+    def _ensure_tapir_runtime(self) -> bool:
+        try:
+            import torch  # noqa: F401
+            import torchvision  # noqa: F401
+            from tapnet.torch import tapir_model  # noqa: F401
+        except ImportError:
+            QMessageBox.warning(
+                self,
+                "未安装 BootsTAPIR",
+                "指定表面点跟踪需要官方 TAPNet PyTorch 组件。\n"
+                "请执行：pip install -r requirements-ai.txt",
+            )
+            return False
+        from ai.model_manager import (
+            BOOTSTAPIR,
+            ModelNotAvailable,
+            checkpoint_path,
+            ensure_checkpoint,
+        )
+
+        if self._download_worker is not None:
+            self.statusBar().showMessage("正在下载权重，请稍候…", 4000)
+            return False
+        try:
+            ensure_checkpoint(BOOTSTAPIR, download=False)
+            return True
+        except ModelNotAvailable:
+            path = checkpoint_path(BOOTSTAPIR)
+            reply = QMessageBox.question(
+                self,
+                "下载 BootsTAPIR",
+                (
+                    "首次使用指定表面点跟踪需要下载官方权重（约 219 MB，Apache-2.0）。\n\n"
+                    f"保存到：{path}\n"
+                    f"来源：{BOOTSTAPIR.url}\n"
+                    f"SHA-256：{BOOTSTAPIR.sha256}\n\n"
+                    "确认下载？"
+                ),
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return False
+            self._start_checkpoint_download(BOOTSTAPIR)
+            return False
+
     def _ensure_download_toast(self) -> DownloadToast:
         if self._download_toast is None:
             self._download_toast = DownloadToast(self)
@@ -1698,7 +2078,10 @@ class MainWindow(QMainWindow):
         self._download_thread = thread
         self._download_worker = worker
         thread.start()
-        label = "SAM 2.1 Tiny" if spec.model_id.endswith("tiny") else "SAM 2.1 Small"
+        if spec.model_id == "bootstapir":
+            label = "BootsTAPIR"
+        else:
+            label = "SAM 2.1 Tiny" if spec.model_id.endswith("tiny") else "SAM 2.1 Small"
         self.statusBar().showMessage(f"正在下载 {label} 权重…")
 
     def _cancel_checkpoint_download(self) -> None:
@@ -1780,12 +2163,8 @@ class MainWindow(QMainWindow):
         self._sam_thread = None
 
     def _track_end_frame(self) -> int:
-        assert self._info is not None
-        _start, end = self._slider.loop_range()
-        last = self._info.frame_count - 1
-        if end > 0:
-            return min(end, last)
-        return last
+        _start, end = self._play_bounds()
+        return end
 
     def _sam_device_label(self) -> str:
         try:
@@ -1815,6 +2194,219 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage("已切换精准分析（Small，逐帧）。", 4000)
 
+    def _sync_tracking_target_actions(self, target: TrackingTarget) -> None:
+        center = getattr(self, "_center_target_action", None)
+        surface = getattr(self, "_surface_target_action", None)
+        if center is None or surface is None:
+            return
+        center.blockSignals(True)
+        surface.blockSignals(True)
+        center.setChecked(target is TrackingTarget.OBJECT_CENTER)
+        surface.setChecked(target is TrackingTarget.SURFACE_POINT)
+        center.blockSignals(False)
+        surface.blockSignals(False)
+
+    def _set_tracking_target(self, target: TrackingTarget) -> None:
+        target = TrackingTarget(target)
+        self._default_tracking_target = target
+        layer = self._active_layer()
+        if layer is not None and layer.tracking_target is not target:
+            self._push_undo()
+            layer.tracking_target = target
+            layer.result = None
+            layer.contours.clear()
+            layer.status = "idle"
+            self._refresh_track_ui()
+        self._sync_tracking_target_actions(target)
+        if target is TrackingTarget.SURFACE_POINT:
+            self.statusBar().showMessage(
+                "指定表面点模式：请用 Shift+左键点击要保持身份的同一物理点。",
+                6000,
+            )
+        else:
+            self.statusBar().showMessage("物体中心模式：可框选完整物体或添加正点。", 4000)
+
+    def _set_anti_interference(self, enabled: bool) -> None:
+        self._anti_interference = bool(enabled)
+        action = getattr(self, "_anti_interference_action", None)
+        if action is not None and action.isChecked() != self._anti_interference:
+            action.blockSignals(True)
+            action.setChecked(self._anti_interference)
+            action.blockSignals(False)
+        if self._anti_interference:
+            self.statusBar().showMessage("已开启抗干扰：跳到背景的点会被拒收。", 4000)
+        else:
+            self.statusBar().showMessage("已关闭抗干扰，使用原始 SAM 2 轨迹。", 4000)
+
+    def _set_projectile(self, enabled: bool) -> None:
+        self._projectile = bool(enabled)
+        action = getattr(self, "_projectile_action", None)
+        if action is not None and action.isChecked() != self._projectile:
+            action.blockSignals(True)
+            action.setChecked(self._projectile)
+            action.blockSignals(False)
+        if self._projectile:
+            self.statusBar().showMessage("已开启抛体运动：偏离抛物线的点会送去复核。", 4000)
+        else:
+            self.statusBar().showMessage("已关闭抛体运动。", 4000)
+
+    # -- fit suggestions ----------------------------------------------------
+
+    def _fit_suggestions(self, layer: TrackLayer | None) -> dict[int, FitSuggestion]:
+        if layer is None or layer.result is None or self._info is None:
+            return {}
+        key = layer.track_id
+        stamp = id(layer.result)
+        cached = self._fit_cache.get(key)
+        if cached is None or cached[0] != stamp:
+            try:
+                cached = (stamp, suggest_points(layer.result.points, self._info))
+            except Exception:  # noqa: BLE001
+                cached = (stamp, {})
+            self._fit_cache[key] = cached
+        dismissed = self._fit_dismissed.get(key, set())
+        return {f: s for f, s in cached[1].items() if f not in dismissed}
+
+    def _set_show_fit_suggestions(self, enabled: bool) -> None:
+        self._show_fit_suggestions = bool(enabled)
+        if not enabled:
+            self._end_manual_fit_pick()
+        self._apply_track_overlay()
+
+    def _accept_fit_here(self) -> None:
+        layer = self._active_layer()
+        suggestion = self._fit_suggestions(layer).get(self._index)
+        if layer is None or layer.result is None or suggestion is None:
+            self.statusBar().showMessage("这一帧没有拟合建议点", 3000)
+            return
+        self._push_undo()
+        self._end_manual_fit_pick()
+        layer.result = accept_suggestion(layer.result, suggestion)
+        self._fit_done = (self._index, "已保留")
+        self._refresh_track_ui()
+        self.statusBar().showMessage(
+            f"已保留第 {self._index + 1} 帧的预测点 ({suggestion.x:.1f}, {suggestion.y:.1f})，"
+            f"误差约 ±{suggestion.sigma_px:.1f}px。可撤销。",
+            5000,
+        )
+
+    def _dismiss_fit_here(self) -> None:
+        layer = self._active_layer()
+        if layer is None or self._index not in self._fit_suggestions(layer):
+            self.statusBar().showMessage("这一帧没有拟合建议点", 3000)
+            return
+        self._end_manual_fit_pick()
+        self._fit_dismissed.setdefault(layer.track_id, set()).add(self._index)
+        self._fit_done = (self._index, "已舍弃")
+        self._apply_track_overlay()
+        self.statusBar().showMessage(f"已舍弃第 {self._index + 1} 帧的拟合建议点", 3000)
+
+    def _accept_all_fits(self) -> None:
+        layer = self._active_layer()
+        suggestions = self._fit_suggestions(layer)
+        if layer is None or layer.result is None or not suggestions:
+            self.statusBar().showMessage("当前轨迹没有拟合建议点", 3000)
+            return
+        extrapolated = sum(1 for s in suggestions.values() if s.method == "extrapolate")
+        text = f"将采用 {len(suggestions)} 个拟合建议点，它们会作为「拟合点（用户确认）」计入数据表和速度。"
+        if extrapolated:
+            text += f"\n其中 {extrapolated} 个是外推（只有一侧有可信点），误差可能较大。"
+        if (
+            QMessageBox.question(self, "采用全部拟合建议点", text + "\n\n可以撤销。")
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        self._push_undo()
+        layer.result = accept_all(layer.result, suggestions)
+        self._refresh_track_ui()
+        self.statusBar().showMessage(f"已采用 {len(suggestions)} 个拟合点，可撤销", 5000)
+
+    def _jump_to_next_fit(self) -> None:
+        frames = sorted(self._fit_suggestions(self._active_layer()))
+        if not frames:
+            self.statusBar().showMessage("当前轨迹没有拟合建议点", 3000)
+            return
+        nxt = next((f for f in frames if f > self._index), frames[0])
+        self._pause()
+        self._show_frame(nxt)
+
+    # -- guided review of predicted points ----------------------------------
+
+    def _start_manual_fit_pick(self) -> None:
+        layer = self._active_layer()
+        if layer is None or layer.result is None:
+            return
+        self._pause()
+        self._manual_pick_frame = self._index
+        self._video.set_manual_pick(True)
+        self._video.fit_card.show_manual(self._index)
+        self._video.place_fit_card()
+        self.statusBar().showMessage(
+            f"手动打点：按住 Shift，用左键点第 {self._index + 1} 帧里物体的中心。Esc 取消。"
+        )
+
+    def _end_manual_fit_pick(self) -> None:
+        if self._manual_pick_frame is None and not self._video.manual_pick_active():
+            return
+        self._manual_pick_frame = None
+        self._video.set_manual_pick(False)
+
+    def _cancel_manual_fit_pick(self) -> None:
+        if self._manual_pick_frame is None:
+            return
+        self._end_manual_fit_pick()
+        self._apply_track_overlay()
+        self.statusBar().showMessage("已取消手动打点", 2500)
+
+    def _remind_manual_shift(self) -> None:
+        self.statusBar().showMessage("要按住 Shift 再用左键点，单独点击是拖动画面。", 4000)
+
+    def _sync_fit_card(self, frame: int, here: FitSuggestion | None, layer: TrackLayer | None) -> None:
+        card = self._video.fit_card
+        if self._manual_pick_frame is not None and self._manual_pick_frame != frame:
+            self._end_manual_fit_pick()
+        pending = self._fit_suggestions(layer) if self._show_fit_suggestions else {}
+        done = self._fit_done
+        if done is not None and done[0] == frame and here is None:
+            self._fit_done = None
+            card.show_done(frame, done[1], len(pending))
+            self._video.place_fit_card()
+            return
+        self._fit_done = None
+        if card.state == "done" and card.frame == frame and here is None:
+            return  # let the confirmation fade out on its own
+        if here is None or self._playing or not self._show_fit_suggestions:
+            if card.state != "hidden":
+                card.dismiss()
+            return
+        if self._manual_pick_frame == frame:
+            if card.state != "manual" or card.frame != frame:
+                card.show_manual(frame)
+        else:
+            card.show_prediction(frame, here.sigma_px, here.points, here.method, len(pending))
+        self._video.place_fit_card()
+
+    def _jump_to_first_review(self) -> None:
+        layer = self._active_layer()
+        if layer is None or layer.result is None:
+            self.statusBar().showMessage("当前轨迹还没有结果", 3000)
+            return
+        point = next(
+            (
+                item
+                for item in sorted(layer.result.points, key=lambda value: value.frame)
+                if not item.usable_for_measurement()
+            ),
+            None,
+        )
+        if point is None:
+            self.statusBar().showMessage("当前轨迹没有待复核区间", 3000)
+            return
+        self._show_frame(point.frame)
+        self.statusBar().showMessage(
+            f"已跳到第 {point.frame + 1} 帧：{point.note or point.status.value}", 5000
+        )
+
     def _stop_shake(self) -> None:
         if self._shake_worker is not None:
             self._shake_worker.cancel()
@@ -1839,19 +2431,44 @@ class MainWindow(QMainWindow):
             return
         self._start_shake()
 
+    def _shake_track_span(self) -> tuple[int, int | None]:
+        frames: list[int] = []
+        for layer in self._tracks:
+            if layer.result is None:
+                continue
+            frames.extend(point.frame for point in layer.result.points if point.visible)
+        if not frames:
+            return 0, None
+        return min(frames), max(frames)
+
+    def _shake_excludes(self) -> dict[int, list[tuple[float, float]]]:
+        exclude: dict[int, list[tuple[float, float]]] = {}
+        for layer in self._tracks:
+            if layer.result is None:
+                continue
+            for point in layer.result.points:
+                if not point.visible:
+                    continue
+                exclude.setdefault(point.frame, []).append((point.x, point.y))
+        return exclude
+
     def _start_shake(self) -> None:
         if self._info is None:
             return
         self._stop_shake()
+        start_frame, end_frame = self._shake_track_span()
         thread, worker = run_shake_in_thread(
             self._info.path,
             on_progress=self._on_shake_progress,
             on_finished=self._on_shake_finished,
             on_failed=self._on_shake_failed,
+            start_frame=start_frame,
+            end_frame=end_frame,
+            exclude_by_frame=self._shake_excludes(),
         )
         self._shake_thread = thread
         self._shake_worker = worker
-        self.statusBar().showMessage("正在根据四角参照点估计镜头抖动…")
+        self.statusBar().showMessage("正在根据背景锚点估计镜头运动…")
         thread.start()
 
     def _on_shake_progress(self, event: ProgressEvent) -> None:
@@ -1866,23 +2483,32 @@ class MainWindow(QMainWindow):
         if self._shake is None or not self._cal_drawn_before_shake:
             return
         self._cal_drawn_before_shake = False
-        dx, dy = self._shake.offset(0)
-        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
-            return
+        dx, dy = self._shake.to_stable(0.0, 0.0, 0)
+        origin_shift = (dx * dx + dy * dy) ** 0.5
         for ruler in self._calibration.rulers:
-            ruler.a = Point2D(ruler.a.x - dx, ruler.a.y - dy)
-            ruler.b = Point2D(ruler.b.x - dx, ruler.b.y - dy)
+            ax, ay = self._shake.to_stable(ruler.a.x, ruler.a.y, 0)
+            bx, by = self._shake.to_stable(ruler.b.x, ruler.b.y, 0)
+            ruler.a = Point2D(ax, ay)
+            ruler.b = Point2D(bx, by)
         if self._calibration.plane is not None:
             self._calibration.plane.corners = [
-                Point2D(point.x - dx, point.y - dy) for point in self._calibration.plane.corners
+                Point2D(*self._shake.to_stable(point.x, point.y, 0))
+                for point in self._calibration.plane.corners
             ]
-        if self._calibration.frame.origin_x is not None:
-            self._calibration.frame.origin_x -= dx
-        if self._calibration.frame.origin_y is not None:
-            self._calibration.frame.origin_y -= dy
+        if self._calibration.frame.origin_x is not None and self._calibration.frame.origin_y is not None:
+            ox, oy = self._shake.to_stable(
+                self._calibration.frame.origin_x, self._calibration.frame.origin_y, 0
+            )
+            self._calibration.frame.origin_x = ox
+            self._calibration.frame.origin_y = oy
         if self._calibration.mode is CalibrationMode.PLANAR:
-            shift = (dx * dx + dy * dy) ** 0.5
-            if shift >= SHAKE_INVALIDATE_PX:
+            amp = 0.0
+            if self._shake.dx:
+                amp = max(
+                    (dx * dx + dy * dy) ** 0.5
+                    for dx, dy in zip(self._shake.dx, self._shake.dy)
+                )
+            if amp >= SHAKE_INVALIDATE_PX or origin_shift >= SHAKE_INVALIDATE_PX:
                 self._calibration.camera_moved = True
             self._calibration.validate()
 
@@ -1892,14 +2518,24 @@ class MainWindow(QMainWindow):
             return
         self._shake = shake
         self._migrate_calibration_after_shake()
-        self._refresh_track_ui()
-        n_frames = len(shake.dx)
+        applied = bool(shake.recommended)
+        if not applied and self._shake_enabled:
+            self._on_shake_apply_toggled(False)
         n_anchors = len(shake.anchors_at(0)) if shake.anchors else 0
-        self.statusBar().showMessage(
-            f"背景补偿完成：已处理 {n_frames} 帧，锁定 {n_anchors} 个四角参照点。"
-            "数据表、分图和 CSV 使用补偿后坐标，画面上的轨迹仍与原视频对齐。",
-            8000,
-        )
+        detail = shake.summary()
+        if applied:
+            self.statusBar().showMessage(
+                f"背景补偿完成：{detail}。已锁定 {n_anchors} 个背景锚点。"
+                "数据表、分图和 CSV 使用补偿后坐标，画面上的轨迹仍与原视频对齐。",
+                8000,
+            )
+        else:
+            self.statusBar().showMessage(
+                f"背景补偿质量不足（{detail}），已保持关闭以免引入抖动。"
+                "安全门控会回退变差片段，无法用开关强制应用。",
+                10000,
+            )
+        self._refresh_track_ui()
 
     def _on_shake_failed(self, message: str) -> None:
         self._stop_shake()
@@ -1914,14 +2550,24 @@ class MainWindow(QMainWindow):
 
     def _on_ai_progress(self, event: ProgressEvent) -> None:
         self._list_panel.set_progress(event.current, event.total)
+        layer = self._active_layer()
+        engine = (
+            "BootsTAPIR"
+            if layer is not None and layer.tracking_target is TrackingTarget.SURFACE_POINT
+            else "SAM"
+        )
         self.statusBar().showMessage(
-            f"SAM 跟踪 {event.current} / {event.total}", 800
+            f"{engine} 跟踪 {event.current} / {event.total}", 800
         )
 
     def _on_ai_finished(self, result: TrackResult) -> None:
         track_id = getattr(result, "track_id", None) or (
             self._ai_worker.track_id if self._ai_worker is not None else self._active_id
         )
+        if track_id is not None:
+            self._fit_dismissed.pop(track_id, None)
+        self._end_manual_fit_pick()
+        self._fit_done = None
         layer = next((t for t in self._tracks if t.track_id == track_id), self._active_layer())
         if layer is not None:
             incoming_start = min((p.frame for p in result.points), default=self._index)
@@ -1937,6 +2583,7 @@ class MainWindow(QMainWindow):
                     model_name=result.model_name,
                     model_version=result.model_version,
                     elapsed_s=result.elapsed_s,
+                    quality_version=result.quality_version,
                 )
                 layer.contours = {
                     frame: pts
@@ -1952,10 +2599,10 @@ class MainWindow(QMainWindow):
         self._export_csv_action.setEnabled(True)
         self._stop_ai()
         self._refresh_track_ui()
-        n = sum(1 for p in result.points if p.visible)
+        n = sum(1 for p in result.points if p.usable_for_measurement())
         self.statusBar().showMessage(
             f"跟踪完成：{n} 个可见点（{result.model_name} {result.elapsed_s:.2f}s）。"
-            "Shift+Control 点击可修正当前帧，Control 拖动可再框选后重跟踪。",
+            "Shift+左键点击可修正当前帧，Control 拖动可再框选后重跟踪。",
             8000,
         )
         self._maybe_start_shake()
@@ -1967,9 +2614,49 @@ class MainWindow(QMainWindow):
             layer.status = "error"
         self._stop_ai()
         self._refresh_track_ui()
-        self.statusBar().showMessage(message or "SAM 跟踪失败", 8000)
+        self.statusBar().showMessage(message or "自动跟踪失败", 8000)
         if message:
-            QMessageBox.warning(self, "SAM 2 跟踪失败", message)
+            QMessageBox.warning(self, "自动跟踪失败", message)
+
+    def _follow_box(
+        self, layer: TrackLayer, frame: int
+    ) -> tuple[float, float, float, float] | None:
+        if layer.result is None:
+            return None
+        contour = [(float(x), float(y)) for x, y in layer.contours.get(frame, [])]
+        found = next(
+            (
+                point
+                for point in layer.result.points
+                if point.frame == frame and point.usable_for_measurement()
+            ),
+            None,
+        )
+        point = None if found is None else (found.x, found.y)
+        template = None
+        for prompt in reversed(layer.prompts):
+            if prompt.kind is PromptKind.BOX and prompt.x2 is not None and prompt.y2 is not None:
+                template = (prompt.x, prompt.y, prompt.x2, prompt.y2)
+                break
+        return object_follow_box(contour, point, template)
+
+    def _sync_video_fit(self, *_args: object) -> None:
+        model = self._chart_panel.fit_model
+        layer = self._active_layer()
+        shown = getattr(self, "_fit_curve_action", None) is not None and self._fit_curve_action.isChecked()
+        if not shown or self._info is None or layer is None or layer.result is None or model == FIT_OFF:
+            self._video.set_fit_curves([])
+            return
+        times: list[float] = []
+        xs: list[float] = []
+        ys: list[float] = []
+        for point in sorted(layer.result.points, key=lambda item: item.frame):
+            if not point.usable_for_measurement():
+                continue
+            times.append(time_s_for_frame(self._info, point.frame))
+            xs.append(point.x)
+            ys.append(point.y)
+        self._video.set_fit_curves(trajectory_curves(times, xs, ys, model))
 
     def _apply_track_overlay(self, index: int | None = None) -> None:
         overlays: list[OverlayTrack] = []
@@ -1979,18 +2666,32 @@ class MainWindow(QMainWindow):
             if not layer.visible:
                 continue
             points = []
+            pending: frozenset[int] = frozenset()
             if layer.result is not None:
                 points = [
-                    (p.frame, p.x, p.y, p.visible, p.confidence) for p in layer.result.points
+                    (p.frame, p.x, p.y, p.visible, p.confidence, p.status.value, p.source.value)
+                    for p in layer.result.points
                 ]
+                pending = frozenset(
+                    p.frame for p in layer.result.points if not p.usable_for_measurement() and not p.manual
+                )
             contour = layer.contours.get(frame, [])
+            is_active = layer.track_id == self._active_id
+            suggestions = {}
+            if is_active and self._show_fit_suggestions:
+                suggestions = {
+                    f: (s.x, s.y, s.sigma_px) for f, s in self._fit_suggestions(layer).items()
+                }
             overlays.append(
                 OverlayTrack(
                     points=points,
                     color=layer.color,
-                    active=layer.track_id == self._active_id,
+                    active=is_active,
                     contour=contour,
                     prompts=layer.prompts,
+                    follow_box=self._follow_box(layer, frame),
+                    suggestions=suggestions,
+                    pending=pending,
                 )
             )
             if (
@@ -1998,9 +2699,37 @@ class MainWindow(QMainWindow):
                 and layer.prompts
                 and layer.result is None
             ):
-                last = layer.prompts[-1]
-                seed = (last.x, last.y)
+                seed = layer.prompts[-1].center()
         self._video.set_overlays(overlays, index=frame, seed=seed)
+        active = self._active_layer()
+        active_point = (
+            None
+            if active is None or active.result is None
+            else next((point for point in active.result.points if point.frame == frame), None)
+        )
+        here = self._fit_suggestions(active).get(frame) if self._show_fit_suggestions else None
+        self._sync_fit_card(frame, here, active)
+        if active_point is not None and (
+            active_point.note or active_point.status.value != "trusted"
+        ):
+            self._video.setToolTip(
+                f"{active_point.status.value} · 追踪质量 {active_point.confidence:.2f}"
+                + (f" · {active_point.note}" if active_point.note else "")
+                + (
+                    f"\n黄色圈：由轨迹拟合预测的位置 ±{here.sigma_px:.1f}px"
+                    f"（{'前后插值' if here.method == 'interpolate' else '单侧外推'}）"
+                    " · F 保留 · Shift+左键 手动打点 · Shift+F 舍弃"
+                    if here is not None
+                    else ""
+                )
+            )
+            if here is not None and not self._playing and self._manual_pick_frame != frame:
+                self.statusBar().showMessage(
+                    f"第 {frame + 1} 帧是预测点 ±{here.sigma_px:.1f}px：F 保留 · Shift+左键 手动打点 · Shift+F 舍弃",
+                    2500,
+                )
+        else:
+            self._video.setToolTip("")
         self._video.set_display_options(
             contours=self._show_contours, prompts=self._show_prompts
         )
@@ -2014,14 +2743,10 @@ class MainWindow(QMainWindow):
         self._list_panel.set_tracks(self._tracks, self._active_id)
         self._view_bar.set_tracks(self._tracks, self._active_id)
         layer = self._active_layer()
+        if layer is not None:
+            self._sync_tracking_target_actions(layer.tracking_target)
         analyzed = self._analysis_result(layer)
-        samples = series_for_result(
-            analyzed,
-            self._info,
-            calibration=self._calibration,
-            velocity_step=self._chart_panel.velocity_step,
-            depth_audit=self._depth_audit,
-        )
+        samples = self._kinematic_samples(analyzed)
         self._data_panel.set_units(
             self._calibration.position_unit, self._calibration.speed_unit
         )
@@ -2039,6 +2764,7 @@ class MainWindow(QMainWindow):
         self._export_track_action.setEnabled(bool(has_result))
         self._export_csv_action.setEnabled(bool(has_result))
         self._apply_track_overlay()
+        self._sync_video_fit()
         if self._info is not None:
             self._chart_panel.highlight_frame(self._index)
             self._data_panel.highlight_frame(self._index)
@@ -2046,13 +2772,7 @@ class MainWindow(QMainWindow):
 
     def _sync_view_bar(self) -> None:
         layer = self._active_layer()
-        samples = series_for_result(
-            self._analysis_result(layer),
-            self._info,
-            calibration=self._calibration,
-            velocity_step=self._chart_panel.velocity_step,
-            depth_audit=self._depth_audit,
-        )
+        samples = self._kinematic_samples(self._analysis_result(layer))
         sample = sample_at_frame(samples, self._index)
         self._view_bar.set_sample(sample)
         if (
@@ -2144,7 +2864,9 @@ class MainWindow(QMainWindow):
             self._info,
             calibration=self._calibration,
             velocity_step=self._chart_panel.velocity_step,
+            velocity_mode=self._chart_panel.velocity_mode,
             depth_audit=self._depth_audit,
+            derivative_model=self._chart_panel.derivative_model,
         )
         self.statusBar().showMessage(f"已导出 CSV {dest}", 4000)
 
@@ -2160,7 +2882,12 @@ class MainWindow(QMainWindow):
         if dest.suffix.lower() != ".json":
             dest = dest.with_suffix(".json")
         active = self._active_layer()
-        spec = spec_for_mode(self._track_mode)
+        if active is not None and active.tracking_target is TrackingTarget.SURFACE_POINT:
+            from ai.model_manager import BOOTSTAPIR
+
+            spec = BOOTSTAPIR
+        else:
+            spec = spec_for_mode(self._track_mode)
         write_track_project(
             dest,
             self._info.path,
@@ -2297,7 +3024,8 @@ class MainWindow(QMainWindow):
         if created:
             self._refresh_track_ui()
         self.statusBar().showMessage(
-            "拖动原点移动，拖动轴尖弯箭头旋转。按住 Shift 以 90° 对齐。Esc 结束编辑。"
+            "拖动原点移动，拖动轴尖弯箭头旋转。按住 Shift 以 90° 对齐。"
+            " Delete 或右键删除坐标轴。Esc 结束编辑。"
         )
 
     def _start_origin_only(self, *_args) -> None:
@@ -2547,6 +3275,24 @@ class MainWindow(QMainWindow):
         self._plane_undo_pushed = False
         if self._pending_plane is None and self._calibration.mode is CalibrationMode.PLANAR:
             self._refresh_track_ui()
+
+    def _clear_axes(self, *_args) -> None:
+        frame = self._calibration.frame
+        if frame.origin is None:
+            self.statusBar().showMessage("当前没有坐标轴。", 3000)
+            return
+        self._push_undo()
+        frame.origin_x = None
+        frame.origin_y = None
+        frame.axis_angle_deg = 0.0
+        self._axis_undo_pushed = False
+        self._axis_rotate_base = None
+        if self._video.interaction_mode() == MODE_AXIS:
+            self._exit_interaction()
+        else:
+            self._sync_cal_overlay()
+        self._refresh_track_ui()
+        self.statusBar().showMessage("已删除坐标轴。标定尺还在。", 4000)
 
     def _clear_calibration(self) -> None:
         self._push_undo()
@@ -2834,6 +3580,26 @@ class MainWindow(QMainWindow):
             self._set_track_mode(TrackMode(str(mode)), announce=False)
         except ValueError:
             self._set_track_mode(TrackMode.PRECISE, announce=False)
+        raw_guard = settings.value("track/anti_interference", True)
+        if isinstance(raw_guard, str):
+            self._anti_interference = raw_guard.strip().lower() not in {"0", "false", "no"}
+        else:
+            self._anti_interference = bool(raw_guard)
+        action = getattr(self, "_anti_interference_action", None)
+        if action is not None:
+            action.blockSignals(True)
+            action.setChecked(self._anti_interference)
+            action.blockSignals(False)
+        raw_projectile = settings.value("track/projectile", False)
+        if isinstance(raw_projectile, str):
+            self._projectile = raw_projectile.strip().lower() in {"1", "true", "yes"}
+        else:
+            self._projectile = bool(raw_projectile)
+        action = getattr(self, "_projectile_action", None)
+        if action is not None:
+            action.blockSignals(True)
+            action.setChecked(self._projectile)
+            action.blockSignals(False)
 
     def _save_window_prefs(self) -> None:
         if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
@@ -2846,6 +3612,8 @@ class MainWindow(QMainWindow):
         settings.setValue("assistant/report_model", self._report_model)
         settings.setValue("assistant/teaching_level", self._assistant_state.teaching_level.value)
         settings.setValue("track/mode", self._track_mode.value)
+        settings.setValue("track/anti_interference", self._anti_interference)
+        settings.setValue("track/projectile", self._projectile)
 
     def _load_assistant_prefs(self, settings: QSettings) -> None:
         chat = settings.value("assistant/chat_model", DEFAULT_CHAT_MODEL)
@@ -2862,7 +3630,22 @@ class MainWindow(QMainWindow):
         self._assistant_panel.set_teaching_level(self._assistant_state.teaching_level)
         self._assistant_panel.set_models(self._chat_model, self._report_model)
 
+    def _reject_assistant(self) -> None:
+        QMessageBox.information(self, "AI 助手", "AI 助手功能暂未开放。")
+        for action in (
+            getattr(self, "_ai_panel_action", None),
+            getattr(self, "_assistant_window_action", None),
+        ):
+            if action is None:
+                continue
+            action.blockSignals(True)
+            action.setChecked(False)
+            action.blockSignals(False)
+
     def _set_assistant_visible(self, visible: bool) -> None:
+        if visible and not ASSISTANT_ENABLED:
+            self._reject_assistant()
+            return
         if visible:
             self._assistant_window.show()
             self._assistant_window.raise_()
@@ -2970,15 +3753,64 @@ class MainWindow(QMainWindow):
                 confirmed and has_api_key() and not sam and not self._assistant_busy
             )
 
-    def _assistant_samples(self):
+    def _pending_positions(self) -> dict[int, tuple[float, float]] | None:
+        """Pixel positions of points waiting for review, for the yellow chart dots."""
+        if not self._show_fit_suggestions:
+            return None
         layer = self._active_layer()
-        return series_for_result(
-            self._analysis_result(layer),
+        if layer is None or layer.result is None:
+            return None
+        positions = {f: (s.x, s.y) for f, s in self._fit_suggestions(layer).items()}
+        for point in layer.result.points:
+            if point.frame in positions or point.usable_for_measurement() or point.manual:
+                continue
+            if point.visible:
+                positions[point.frame] = (point.x, point.y)
+        return positions
+
+    def _kinematic_samples(self, result: TrackResult | None = None):
+        samples = series_for_result(
+            result,
             self._info,
             calibration=self._calibration,
             velocity_step=self._chart_panel.velocity_step,
+            velocity_mode=self._chart_panel.velocity_mode,
             depth_audit=self._depth_audit,
+            derivative_model=self._chart_panel.derivative_model,
+            pending_positions=self._pending_positions(),
         )
+        fit = projectile_velocity_model(samples, calibration=self._calibration)
+        if fit is None:
+            self._chart_panel.set_model_warning("")
+            return samples
+        r2x = float(fit.parameters.get("r2x") or 0.0)
+        if r2x < 0.98:
+            hint = "镜头运动、透视或跟踪误差使像素速度不满足理想斜抛"
+            if self._chart_panel.derivative_model == FIT_OFF:
+                hint += "。想看符合物理的 v、a：在「函数」里选「斜抛+空气阻力」"
+            self._chart_panel.set_model_warning(hint)
+        else:
+            self._chart_panel.set_model_warning("")
+        if not self._calibration.active:
+            self._chart_panel.set_model_warning(
+                "未标定：图中速度为图像投影速度 px/s。"
+                + (
+                    " 镜头运动、透视或跟踪误差使像素速度不满足理想斜抛"
+                    if r2x < 0.98
+                    else ""
+                )
+            )
+        return attach_model_velocity(
+            samples,
+            v0x=float(fit.parameters.get("v0x") or 0.0),
+            v0y=float(fit.parameters.get("v0y") or 0.0),
+            ay=float(fit.parameters.get("a_y") or 0.0),
+            time_start_s=fit.time_start_s,
+            time_end_s=fit.time_end_s,
+        )
+
+    def _assistant_samples(self):
+        return self._kinematic_samples(self._analysis_result(self._active_layer()))
 
     def _teaching_context(self) -> dict:
         plane = self._calibration.plane
@@ -3004,6 +3836,9 @@ class MainWindow(QMainWindow):
         return any(point.interpolated for point in layer.result.points)
 
     def _analyze_experiment(self, *_args) -> None:
+        if not ASSISTANT_ENABLED:
+            self._reject_assistant()
+            return
         self._set_assistant_visible(True)
         if self._ai_worker is not None:
             message = "请等待 SAM 跟踪完成后再分析"
@@ -3077,6 +3912,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"已确认实验：{match.label}", 4000)
 
     def _send_assistant_chat(self, text: str) -> None:
+        if not ASSISTANT_ENABLED:
+            self._reject_assistant()
+            return
         if not has_api_key():
             warn_missing_key(self._assistant_dialog_parent())
             return
@@ -3109,6 +3947,9 @@ class MainWindow(QMainWindow):
         )
 
     def _generate_assistant_report(self, *_args) -> None:
+        if not ASSISTANT_ENABLED:
+            self._reject_assistant()
+            return
         if self._ai_worker is not None:
             self.statusBar().showMessage("请等待 SAM 跟踪完成后再生成报告", 4000)
             return

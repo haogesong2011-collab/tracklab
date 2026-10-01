@@ -26,6 +26,7 @@ from app.update_checker import (
     can_self_update,
     check_for_update,
     status_bar_message,
+    update_is_required,
 )
 
 
@@ -158,6 +159,17 @@ def run_self_update_in_thread(
     return thread, worker
 
 
+def _download_hint(info: UpdateInfo) -> str:
+    installer = info.installer
+    full = f"约 {format_bytes(installer.size)}" if installer is not None and installer.size else "完整安装包"
+    spec = info.patch_for()
+    if spec is not None and spec.size:
+        return f"优先下载补丁（约 {format_bytes(spec.size)}）。不适用时下载{full}"
+    if spec is not None:
+        return f"优先下载补丁。不适用时下载{full}"
+    return f"下载{full}"
+
+
 class UpdateDialog(QDialog):
     def __init__(self, parent: QWidget | None, info: UpdateInfo) -> None:
         super().__init__(parent)
@@ -169,7 +181,13 @@ class UpdateDialog(QDialog):
         layout.setSpacing(10)
 
         latest = info.latest or ""
-        summary = QLabel(f"当前版本 {info.current}，最新版本 {latest}。")
+        required = update_is_required(info.current, info.minimum_version, info.critical)
+        if required:
+            summary = QLabel(
+                f"当前版本 {info.current} 必须更新到 {latest} 后才能继续。"
+            )
+        else:
+            summary = QLabel(f"当前版本 {info.current}，最新版本 {latest}。")
         summary.setWordWrap(True)
         layout.addWidget(summary)
         if info.published_at:
@@ -178,13 +196,10 @@ class UpdateDialog(QDialog):
 
         self._self_update = can_self_update(info)
         if self._self_update:
-            size = 0
-            installer = info.installer
-            if installer is not None:
-                size = installer.size
-            extra = "约 " + format_bytes(size) if size else "安装包"
             hint = QLabel(
-                f"点击「立即更新」将下载{extra}，校验后替换当前应用并重启。"
+                "点击「立即更新」将"
+                + _download_hint(info)
+                + "，校验后替换当前应用并重启。"
             )
             hint.setWordWrap(True)
             hint.setObjectName("panelHint")
@@ -198,14 +213,15 @@ class UpdateDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        skip = QPushButton("跳过此版本")
-        later = QPushButton("稍后提醒")
-        download = QPushButton("立即更新" if self._self_update else "前往下载")
+        later = QPushButton("稍后提醒", self)
+        download = QPushButton("立即更新" if self._self_update else "前往下载", self)
         download.setDefault(True)
-        skip.clicked.connect(self._skip)
         later.clicked.connect(self._later)
         download.clicked.connect(self._download)
-        buttons.addWidget(skip)
+        if not required:
+            skip = QPushButton("跳过此版本", self)
+            skip.clicked.connect(self._skip)
+            buttons.addWidget(skip)
         buttons.addWidget(later)
         buttons.addWidget(download)
         layout.addLayout(buttons)

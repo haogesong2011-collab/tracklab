@@ -296,6 +296,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
         from PySide6.QtWidgets import QApplication
 
         from app.main_window import MainWindow
+        from app.marks import TRUSTED_GREEN
 
         app = QApplication.instance() or QApplication(sys.argv)
         _ = app
@@ -313,7 +314,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
             ],
         )
         window._refresh_track_ui()
-        self.assertEqual(window._data_panel._table.columnCount(), 8)
+        self.assertEqual(window._data_panel._table.columnCount(), 10)
         self.assertEqual(window._data_panel._table.rowCount(), 5)
         self.assertEqual(window._data_panel._table.item(2, 2).text(), "")
         self.assertEqual(set(window._view_bar._fields), {"t", "x", "y"})
@@ -329,8 +330,12 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertEqual(window._chart_panel._charts[0]._axis_value.titleText(), "x (px)")
         self.assertEqual(window._chart_panel._charts[0]._axis_time.titleText(), "t (s)")
         self.assertEqual(window._data_panel._table.horizontalHeaderItem(2).text(), "x (px)")
+        self.assertEqual(window._chart_panel.velocity_mode, "local")
         window._chart_panel._selects[1].setCurrentIndex(2)
-        self.assertEqual(window._chart_panel._charts[1]._axis_value.titleText(), "vₓ (px/s)")
+        self.assertEqual(
+            window._chart_panel._charts[1]._axis_value.titleText(),
+            "vₓ (图像投影速度 px/s)",
+        )
         v_names = {
             series.name()
             for series in window._chart_panel._charts[1].chart().series()
@@ -348,7 +353,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
             series
             for series in window._chart_panel._charts[0]._series
             if isinstance(series, QScatterSeries)
-            and series.color() == QColor("#6cb6ff")
+            and series.color() == QColor(TRUSTED_GREEN)
             and series.count() == 4
         )
         self.assertEqual(x_dots.count(), 4)
@@ -475,6 +480,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
         window.close()
 
     def test_download_toast_sits_bottom_right(self) -> None:
+        from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QApplication
 
         from ai.model_manager import SAM21_TINY
@@ -497,7 +503,10 @@ class DesktopAcceptanceTests(unittest.TestCase):
         QApplication.processEvents()
         self.assertIn("Tiny", toast._title.text())
         self.assertIn("25%", toast._status.text())
-        center = window.mapToGlobal(window.rect().center())
+        center = window.rect().center()
+        self.assertIs(toast.window(), window)
+        self.assertFalse(bool(toast.windowFlags() & Qt.WindowType.Tool))
+        self.assertFalse(bool(toast.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
         self.assertGreater(toast.x(), center.x())
         self.assertGreater(toast.y(), center.y())
         toast.set_stage("verify")
@@ -667,6 +676,44 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertEqual(window._track_mode, TrackMode.FAST)
         window.close()
 
+    def test_anti_interference_menu_and_rejected_row(self) -> None:
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QApplication
+
+        from ai.track_guard import REJECT_BACKGROUND
+        from app.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        _ = app
+        window = MainWindow()
+        self.assertTrue(window._anti_interference)
+        self.assertTrue(window._anti_interference_action.isChecked())
+        window._anti_interference_action.setChecked(False)
+        self.assertFalse(window._anti_interference)
+        window._set_anti_interference(True)
+        self.assertTrue(window._anti_interference)
+        window._new_track()
+        layer = window._tracks[0]
+        layer.result = TrackResult(
+            clip_id="c",
+            points=[
+                TrackPoint(
+                    frame=0, x=8, y=8, visible=False, confidence=0.2, note=REJECT_BACKGROUND
+                ),
+                TrackPoint(frame=1, x=12, y=8, visible=True, confidence=0.95),
+            ],
+        )
+        window._refresh_track_ui()
+        warn = QColor("#f0c14b")
+        self.assertEqual(
+            window._data_panel._table.item(0, 2).foreground().color().name(), warn.name()
+        )
+        self.assertIn("已拒收：疑似跳到背景", window._data_panel._table.item(0, 2).toolTip())
+        self.assertNotEqual(
+            window._data_panel._table.item(1, 2).foreground().color().name(), warn.name()
+        )
+        window.close()
+
     def test_low_confidence_yellow_and_calibration_units(self) -> None:
         from PySide6.QtCharts import QScatterSeries
         from PySide6.QtGui import QColor
@@ -675,6 +722,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
         from ai.calibration import uniform_state
         from ai.schema import Point2D
         from app.main_window import MainWindow
+        from app.marks import PENDING_YELLOW, TRUSTED_GREEN
 
         app = QApplication.instance() or QApplication(sys.argv)
         _ = app
@@ -691,7 +739,7 @@ class DesktopAcceptanceTests(unittest.TestCase):
         window._refresh_track_ui()
         warn = QColor("#f0c14b")
         self.assertEqual(window._data_panel._table.item(0, 2).foreground().color().name(), warn.name())
-        self.assertIn("低可信度", window._data_panel._table.item(0, 2).toolTip())
+        self.assertIn("追踪质量", window._data_panel._table.item(0, 2).toolTip())
         self.assertNotEqual(window._data_panel._table.item(1, 2).foreground().color().name(), warn.name())
         window._index = 0
         window._sync_view_bar()
@@ -702,10 +750,15 @@ class DesktopAcceptanceTests(unittest.TestCase):
         scatters = [
             series
             for series in window._chart_panel._charts[0].chart().series()
-            if isinstance(series, QScatterSeries)
+            if isinstance(series, QScatterSeries) and series.count() > 0
         ]
-        self.assertEqual(sorted(series.count() for series in scatters), [1, 1, 2])
-        self.assertTrue(any(series.color() == warn for series in scatters))
+        green = QColor(TRUSTED_GREEN)
+        measured = [series for series in scatters if series.color() == green]
+        self.assertEqual(sorted(series.count() for series in measured), [1, 1])
+        self.assertEqual(
+            sum(series.borderColor() == QColor(PENDING_YELLOW) for series in measured),
+            1,
+        )
         chart = window._chart_panel._charts[0]
         self.assertEqual(chart._active_dot.count(), 1)
         self.assertAlmostEqual(chart._active_dot.markerSize(), 6.0)
@@ -822,8 +875,54 @@ class DesktopAcceptanceTests(unittest.TestCase):
         self.assertEqual(window._chart_panel._charts[0]._axis_value.titleText(), "x (m)")
         self.assertIn("vₓ", window._chart_panel._selects[0].itemText(2))
         self.assertIn("m/s", window._chart_panel._selects[0].itemText(2))
-        self.assertEqual(window._chart_panel.velocity_step, 3)
-        self.assertEqual(window._chart_panel._fit.itemText(1), "线性")
+        self.assertEqual(window._chart_panel.velocity_step, 0)
+        self.assertEqual(window._chart_panel._fit.itemText(1), "自动")
+        self.assertEqual(window._chart_panel._fit.itemText(2), "匀速")
+        window._calibration.frame.origin_x = 10.0
+        window._calibration.frame.origin_y = 20.0
+        window._calibration.frame.axis_angle_deg = 30.0
+        window._sync_cal_overlay()
+        self.assertIsNotNone(window._video._axis_overlay)
+        window._clear_axes()
+        self.assertIsNone(window._calibration.frame.origin)
+        self.assertEqual(window._calibration.frame.axis_angle_deg, 0.0)
+        self.assertIsNone(window._video._axis_overlay)
+        self.assertTrue(window._calibration.rulers)
+        window._undo()
+        self.assertAlmostEqual(window._calibration.frame.origin_x or 0.0, 10.0)
+        window.close()
+
+    def test_projectile_model_dashed_line_on_velocity_chart(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+
+        from app.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        _ = app
+        window = MainWindow()
+        window._new_track()
+        window._tracks[0].result = TrackResult(
+            clip_id="c",
+            points=[
+                TrackPoint(frame=i, x=10.0 + 3.0 * i, y=20.0 + 8.0 * i - 0.4 * i * i)
+                for i in range(12)
+            ],
+        )
+        window._refresh_track_ui()
+        window._chart_panel._selects[1].setCurrentIndex(2)
+        names = {
+            series.name()
+            for series in window._chart_panel._charts[1].chart().series()
+            if series.name()
+        }
+        self.assertIn("vₓ", names)
+        model = next(
+            series
+            for series in window._chart_panel._charts[1].chart().series()
+            if series.name() == "斜抛模型"
+        )
+        self.assertEqual(model.pen().style(), Qt.PenStyle.DotLine)
         window.close()
 
     def test_docks_float_and_redock_right_only(self) -> None:
@@ -876,7 +975,8 @@ class DesktopAcceptanceTests(unittest.TestCase):
 
     def test_assistant_entry_and_default_hidden(self) -> None:
         from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        from unittest.mock import patch
 
         from app.main_window import MainWindow
 
@@ -893,20 +993,16 @@ class DesktopAcceptanceTests(unittest.TestCase):
             window._workspace.chart_dock.allowedAreas(),
             Qt.DockWidgetArea.RightDockWidgetArea,
         )
-        window._show_assistant_panel()
-        self.assertTrue(window._assistant_window.isVisible())
-        self.assertIs(window._assistant_window.centralWidget(), window._assistant_panel)
-        window._set_assistant_visible(False)
-        self.assertFalse(window._assistant_window.isVisible())
-        window._assistant_window_action.setChecked(True)
-        self.assertTrue(window._assistant_window.isVisible())
+        with patch.object(QMessageBox, "information", return_value=QMessageBox.StandardButton.Ok) as info:
+            window._show_assistant_panel()
+            self.assertFalse(window._assistant_window.isVisible())
+            window._assistant_window_action.setChecked(True)
+            self.assertFalse(window._assistant_window.isVisible())
+            self.assertFalse(window._assistant_window_action.isChecked())
+            self.assertGreaterEqual(info.call_count, 1)
+            self.assertIn("暂未开放", info.call_args[0][2])
         window._assistant_panel.add_user_message("会话应保留")
-        window._assistant_window.close()
         self.assertTrue(window.isVisible())
-        self.assertFalse(window._assistant_window.isVisible())
-        self.assertIn("会话应保留", window._assistant_panel.chat_text())
-        window._show_assistant_panel()
-        self.assertTrue(window._assistant_window.isVisible())
         self.assertIn("会话应保留", window._assistant_panel.chat_text())
         window.close()
 
@@ -916,69 +1012,76 @@ class DesktopAcceptanceTests(unittest.TestCase):
         from PySide6.QtWidgets import QApplication, QTableWidgetItem
 
         from app.main_window import MainWindow
+        import app.main_window as main_window_module
 
         app = QApplication.instance() or QApplication(sys.argv)
         window = MainWindow()
         window.resize(1280, 800)
         window.show()
         app.processEvents()
-        workspace = window._workspace
-        self.assertIsNone(getattr(workspace, "assistant_dock", None))
-        self.assertEqual(
-            workspace.dockWidgetArea(workspace.chart_dock),
-            Qt.DockWidgetArea.RightDockWidgetArea,
-        )
-        self.assertEqual(
-            workspace.dockWidgetArea(workspace.data_dock),
-            Qt.DockWidgetArea.RightDockWidgetArea,
-        )
-        window._show_assistant_panel()
-        app.processEvents()
-        self.assertTrue(window._assistant_window.isVisible())
-        self.assertFalse(workspace.isAncestorOf(window._assistant_panel))
-        self.assertEqual(
-            workspace.dockWidgetArea(workspace.chart_dock),
-            Qt.DockWidgetArea.RightDockWidgetArea,
-        )
-        self.assertEqual(
-            workspace.dockWidgetArea(workspace.data_dock),
-            Qt.DockWidgetArea.RightDockWidgetArea,
-        )
-        self.assertEqual(workspace.tabifiedDockWidgets(workspace.chart_dock), [])
-        self.assertEqual(workspace.tabifiedDockWidgets(workspace.data_dock), [])
-        table = window._data_panel._table
-        table.setRowCount(2)
-        for row in range(2):
-            item = QTableWidgetItem(str(row + 1))
-            item.setData(Qt.ItemDataRole.UserRole, row)
-            table.setItem(row, 0, item)
-        app.processEvents()
-        viewport = table.viewport()
-        QTest.mouseClick(
-            viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(16, 12)
-        )
-        app.processEvents()
-        QTest.mouseClick(
-            table.horizontalHeader(),
-            Qt.MouseButton.LeftButton,
-            Qt.KeyboardModifier.NoModifier,
-            QPoint(24, 6),
-        )
-        app.processEvents()
-        workspace.data_dock.raise_()
-        app.processEvents()
-        workspace._normalize()
-        app.processEvents()
-        self.assertTrue(window.isVisible())
-        self.assertTrue(workspace.data_visible)
-        self.assertTrue(window._assistant_window.isVisible())
-        self.assertFalse(workspace.data_dock.isHidden())
-        self.assertEqual(workspace.tabifiedDockWidgets(workspace.chart_dock), [])
-        self.assertEqual(workspace.tabifiedDockWidgets(workspace.data_dock), [])
-        window.close()
+        previous = main_window_module.ASSISTANT_ENABLED
+        main_window_module.ASSISTANT_ENABLED = True
+        try:
+            workspace = window._workspace
+            self.assertIsNone(getattr(workspace, "assistant_dock", None))
+            self.assertEqual(
+                workspace.dockWidgetArea(workspace.chart_dock),
+                Qt.DockWidgetArea.RightDockWidgetArea,
+            )
+            self.assertEqual(
+                workspace.dockWidgetArea(workspace.data_dock),
+                Qt.DockWidgetArea.RightDockWidgetArea,
+            )
+            window._show_assistant_panel()
+            app.processEvents()
+            self.assertTrue(window._assistant_window.isVisible())
+            self.assertFalse(workspace.isAncestorOf(window._assistant_panel))
+            self.assertEqual(
+                workspace.dockWidgetArea(workspace.chart_dock),
+                Qt.DockWidgetArea.RightDockWidgetArea,
+            )
+            self.assertEqual(
+                workspace.dockWidgetArea(workspace.data_dock),
+                Qt.DockWidgetArea.RightDockWidgetArea,
+            )
+            self.assertEqual(workspace.tabifiedDockWidgets(workspace.chart_dock), [])
+            self.assertEqual(workspace.tabifiedDockWidgets(workspace.data_dock), [])
+            table = window._data_panel._table
+            table.setRowCount(2)
+            for row in range(2):
+                item = QTableWidgetItem(str(row + 1))
+                item.setData(Qt.ItemDataRole.UserRole, row)
+                table.setItem(row, 0, item)
+            app.processEvents()
+            viewport = table.viewport()
+            QTest.mouseClick(
+                viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(16, 12)
+            )
+            app.processEvents()
+            QTest.mouseClick(
+                table.horizontalHeader(),
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                QPoint(24, 6),
+            )
+            app.processEvents()
+            workspace.data_dock.raise_()
+            app.processEvents()
+            workspace._normalize()
+            app.processEvents()
+            self.assertTrue(window.isVisible())
+            self.assertTrue(workspace.data_visible)
+            self.assertTrue(window._assistant_window.isVisible())
+            self.assertFalse(workspace.data_dock.isHidden())
+            self.assertEqual(workspace.tabifiedDockWidgets(workspace.chart_dock), [])
+            self.assertEqual(workspace.tabifiedDockWidgets(workspace.data_dock), [])
+        finally:
+            main_window_module.ASSISTANT_ENABLED = previous
+            window.close()
 
     def test_assistant_gating_without_key_or_track(self) -> None:
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        from unittest.mock import patch
 
         from app.main_window import MainWindow
 
@@ -987,8 +1090,10 @@ class DesktopAcceptanceTests(unittest.TestCase):
         window = MainWindow()
         self.assertFalse(window._ai_analyze_action.isEnabled())
         self.assertFalse(window._ai_report_action.isEnabled())
-        window._generate_assistant_report()
+        with patch.object(QMessageBox, "information", return_value=QMessageBox.StandardButton.Ok):
+            window._generate_assistant_report()
         self.assertFalse(window._assistant_busy)
+        self.assertFalse(window._assistant_window.isVisible())
         window.close()
 
     def test_assistant_stream_stop_and_stale(self) -> None:
@@ -997,67 +1102,73 @@ class DesktopAcceptanceTests(unittest.TestCase):
         from ai.api_credentials import set_api_key
         from ai.contracts import TrackLayer, TrackPoint, TrackResult
         from app.main_window import MainWindow
+        import app.main_window as main_window_module
         from engine.video_index import VideoInfo
 
         app = QApplication.instance() or QApplication(sys.argv)
         _ = app
         set_api_key("sk-test", persist=False)
         window = MainWindow()
-        window._info = VideoInfo(
-            path=Path("clip.mp4"),
-            width=64,
-            height=64,
-            pts=tuple(range(8)),
-            time_base=0.001,
-            pts_ms=tuple(i * 33 for i in range(8)),
-        )
-        points = [TrackPoint(frame=i, x=float(i * 4), y=10.0) for i in range(8)]
-        window._tracks = [
-            TrackLayer(track_id="t1", name="轨迹 1", result=TrackResult(clip_id="c", points=points))
-        ]
-        window._active_id = "t1"
-        chunks = [
-            'data: {"choices":[{"delta":{"content":"甲"}}]}',
-            'data: {"choices":[{"delta":{"content":"乙"}}]}',
-            "data: [DONE]",
-        ]
+        previous = main_window_module.ASSISTANT_ENABLED
+        main_window_module.ASSISTANT_ENABLED = True
+        try:
+            window._info = VideoInfo(
+                path=Path("clip.mp4"),
+                width=64,
+                height=64,
+                pts=tuple(range(8)),
+                time_base=0.001,
+                pts_ms=tuple(i * 33 for i in range(8)),
+            )
+            points = [TrackPoint(frame=i, x=float(i * 4), y=10.0) for i in range(8)]
+            window._tracks = [
+                TrackLayer(track_id="t1", name="轨迹 1", result=TrackResult(clip_id="c", points=points))
+            ]
+            window._active_id = "t1"
+            chunks = [
+                'data: {"choices":[{"delta":{"content":"甲"}}]}',
+                'data: {"choices":[{"delta":{"content":"乙"}}]}',
+                "data: [DONE]",
+            ]
 
-        def transport(url, headers, payload, timeout, stream):
-            self.assertNotIn("sk-test", url)
-            return list(chunks)
+            def transport(url, headers, payload, timeout, stream):
+                self.assertNotIn("sk-test", url)
+                return list(chunks)
 
-        window._assistant_transport = transport
-        window._refresh_track_ui()
-        window._analyze_experiment()
-        deadline = time.time() + 3
-        while window._assistant_busy and time.time() < deadline:
+            window._assistant_transport = transport
+            window._refresh_track_ui()
+            window._analyze_experiment()
+            deadline = time.time() + 3
+            while window._assistant_busy and time.time() < deadline:
+                app.processEvents()
+                time.sleep(0.01)
             app.processEvents()
-            time.sleep(0.01)
-        app.processEvents()
-        self.assertIsNotNone(window._assistant_state.analysis)
-        self.assertIn("本地轨迹拟合", window._assistant_panel.chat_text())
-        analysis = window._assistant_state.analysis
-        chosen = analysis.selected or (analysis.candidates[0] if analysis.candidates else None)
-        self.assertIsNotNone(chosen)
-        window._assistant_state.confirmed_type = chosen.experiment_type
-        window._send_assistant_chat("解释一下")
-        deadline = time.time() + 3
-        while window._assistant_busy and time.time() < deadline:
+            self.assertIsNotNone(window._assistant_state.analysis)
+            self.assertIn("本地轨迹拟合", window._assistant_panel.chat_text())
+            analysis = window._assistant_state.analysis
+            chosen = analysis.selected or (analysis.candidates[0] if analysis.candidates else None)
+            self.assertIsNotNone(chosen)
+            window._assistant_state.confirmed_type = chosen.experiment_type
+            window._send_assistant_chat("解释一下")
+            deadline = time.time() + 3
+            while window._assistant_busy and time.time() < deadline:
+                app.processEvents()
+                time.sleep(0.01)
             app.processEvents()
-            time.sleep(0.01)
-        app.processEvents()
-        self.assertTrue(any(m.role == "assistant" for m in window._assistant_state.messages))
-        thoughts = window._assistant_panel._chat._host.findChildren(QFrame)
-        thinking = [w for w in thoughts if w.objectName() == "assistantThinking"]
-        self.assertTrue(thinking)
-        self.assertIn("已思考", thinking[-1]._toggle.text())
-        window._tracks[0].result.points[0].x = 99.0
-        window._refresh_track_ui()
-        self.assertTrue(window._assistant_state.stale)
-        window.close()
-        from ai import api_credentials as creds
+            self.assertTrue(any(m.role == "assistant" for m in window._assistant_state.messages))
+            thoughts = window._assistant_panel._chat._host.findChildren(QFrame)
+            thinking = [w for w in thoughts if w.objectName() == "assistantThinking"]
+            self.assertTrue(thinking)
+            self.assertIn("已思考", thinking[-1]._toggle.text())
+            window._tracks[0].result.points[0].x = 99.0
+            window._refresh_track_ui()
+            self.assertTrue(window._assistant_state.stale)
+        finally:
+            main_window_module.ASSISTANT_ENABLED = previous
+            window.close()
+            from ai import api_credentials as creds
 
-        creds._session_key = None
+            creds._session_key = None
 
     def test_project_v4_assistant_roundtrip_and_v3_compat(self) -> None:
         from ai.contracts import AssistantState, ExperimentType, TeachingLevel

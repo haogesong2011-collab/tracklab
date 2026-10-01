@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import ssl
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Callable, Mapping, Sequence
 
@@ -18,6 +19,7 @@ from app import GITHUB_REPO, __version__
 
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
+_RELEASE_TAG = re.compile(r"/releases/tag/(v\d+\.\d+\.\d+)\b")
 ALLOWED_DOWNLOAD_HOSTS = {"github.com", "www.github.com"}
 CHECK_INTERVAL_S = 24 * 3600
 DEFAULT_TIMEOUT_S = 8.0
@@ -50,6 +52,17 @@ class ReleaseAsset:
 
 
 @dataclass(frozen=True)
+class PatchSpec:
+    """A code-only zip for one CPU, valid only when the runtime fingerprint matches."""
+
+    arch: str
+    asset: str
+    runtime: str
+    sha256: str
+    size: int = 0
+
+
+@dataclass(frozen=True)
 class UpdateInfo:
     status: UpdateStatus
     current: str
@@ -59,6 +72,9 @@ class UpdateInfo:
     published_at: str = ""
     message: str = ""
     assets: tuple[ReleaseAsset, ...] = field(default_factory=tuple)
+    minimum_version: str = ""
+    critical: bool = False
+    patches: tuple[PatchSpec, ...] = ()
 
     @property
     def download_url(self) -> str:
@@ -76,6 +92,24 @@ class UpdateInfo:
             if asset.name == want:
                 return asset
         return None
+
+    def patch_for(self, machine: str | None = None) -> PatchSpec | None:
+        kind = arch_name(machine)
+        if not kind:
+            return None
+        for spec in self.patches:
+            if spec.arch == kind and spec.asset and spec.runtime and spec.sha256:
+                return spec
+        return None
+
+
+def arch_name(machine: str | None = None) -> str | None:
+    kind = (machine or os.uname().machine).strip().lower()
+    if kind in {"arm64", "aarch64"}:
+        return "arm64"
+    if kind in {"x86_64", "amd64"}:
+        return "x86_64"
+    return None
 
 
 def parse_version(tag: str) -> tuple[int, int, int] | None:
@@ -134,12 +168,31 @@ def format_published_at(value: str) -> str:
 
 def dmg_filename(machine: str | None = None) -> str | None:
     """Installer name shipped by ``release-macos.yml`` for this CPU."""
-    kind = (machine or os.uname().machine).strip().lower()
-    if kind in {"arm64", "aarch64"}:
+    kind = arch_name(machine)
+    if kind == "arm64":
         return "TrackLab-arm64.dmg"
-    if kind in {"x86_64", "amd64"}:
+    if kind == "x86_64":
         return "TrackLab-x86_64.dmg"
     return None
+
+
+def release_download_url(tag: str, name: str) -> str | None:
+    version = str(tag or "").strip()
+    if version.startswith(("v", "V")):
+        version = version[1:]
+    if parse_version(version) is None or not name or "/" in name or name.startswith("."):
+        return None
+    return safe_release_url(
+        f"https://github.com/{GITHUB_REPO}/releases/download/v{version}/{name}"
+    )
+
+
+def version_from_release_url(url: str) -> str | None:
+    match = _RELEASE_TAG.search(str(url or ""))
+    if match is None:
+        return None
+    tag = match.group(1)
+    return tag if parse_version(tag) else None
 
 
 def parse_sha256sums(text: str) -> dict[str, str]:
@@ -209,6 +262,71 @@ def checksums_asset(assets: Sequence[ReleaseAsset]) -> ReleaseAsset | None:
     return None
 
 
+def update_json_asset(assets: Sequence[ReleaseAsset]) -> ReleaseAsset | None:
+    for asset in assets:
+        if asset.name == "update.json":
+            return asset
+    return None
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes"}
+
+
+def parse_patch_table(payload: object) -> tuple[PatchSpec, ...]:
+    if not isinstance(payload, Mapping):
+        return ()
+    specs: list[PatchSpec] = []
+    for arch, raw in payload.items():
+        kind = arch_name(str(arch))
+        if kind is None or not isinstance(raw, Mapping):
+            continue
+        asset = str(raw.get("asset") or "").strip()
+        runtime = str(raw.get("runtime") or "").strip().lower()
+        digest = str(raw.get("sha256") or "").strip().lower()
+        if not asset or len(runtime) != 64 or len(digest) != 64:
+            continue
+        try:
+            size = int(raw.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        specs.append(
+            PatchSpec(
+                arch=kind,
+                asset=asset,
+                runtime=runtime,
+                sha256=digest,
+                size=max(0, size),
+            )
+        )
+    return tuple(specs)
+
+
+def parse_update_manifest(payload: object) -> tuple[str, bool]:
+    """Return ``(minimum_version, critical)``. Invalid input yields ``("", False)``."""
+    if not isinstance(payload, Mapping):
+        return "", False
+    minimum = str(payload.get("minimum_version") or "").strip()
+    if parse_version(minimum) is None:
+        minimum = ""
+    return minimum, _as_bool(payload.get("critical"))
+
+
+def update_is_required(current: str, minimum_version: str, critical: bool) -> bool:
+    """A newer release must be installed when it is critical or below the floor."""
+    if critical:
+        return True
+    floor = parse_version(minimum_version)
+    installed = parse_version(current)
+    if floor is None or installed is None:
+        return False
+    return installed < floor
+
+
 def can_self_update(
     info: UpdateInfo,
     *,
@@ -268,7 +386,9 @@ def _default_transport(url: str, headers: dict[str, str], timeout_s: float) -> t
     request = urllib.request.Request(url, headers=headers, method="GET")
     try:
         with urllib.request.urlopen(request, timeout=timeout_s, context=_ssl_context()) as response:
-            return int(response.status), dict(response.headers.items()), response.read()
+            headers = dict(response.headers.items())
+            headers["X-Tracklab-Final-Url"] = response.geturl()
+            return int(response.status), headers, response.read()
     except urllib.error.HTTPError as exc:
         body = b""
         try:
@@ -303,13 +423,19 @@ def evaluate_release(
     *,
     skipped: str = "",
     honor_skip: bool = True,
+    minimum_version: str = "",
+    critical: bool = False,
 ) -> UpdateInfo:
     assets = parse_release_assets(payload)
+    minimum = minimum_version if parse_version(minimum_version) else ""
+    required = update_is_required(current, minimum, critical)
     common = {
         "html_url": safe_release_url(str(payload.get("html_url") or "") or None),
         "notes": str(payload.get("body") or "").strip(),
         "published_at": format_published_at(str(payload.get("published_at") or "")),
         "assets": assets,
+        "minimum_version": minimum,
+        "critical": bool(critical),
     }
     if payload.get("draft") or payload.get("prerelease"):
         return UpdateInfo(
@@ -337,7 +463,12 @@ def evaluate_release(
             **common,
         )
     skipped_parsed = parse_version(skipped) if skipped else None
-    if honor_skip and skipped_parsed is not None and skipped_parsed == parsed:
+    if (
+        honor_skip
+        and not required
+        and skipped_parsed is not None
+        and skipped_parsed == parsed
+    ):
         return UpdateInfo(
             status=UpdateStatus.SKIPPED,
             current=current,
@@ -349,8 +480,144 @@ def evaluate_release(
         status=UpdateStatus.AVAILABLE,
         current=current,
         latest=tag,
-        message=f"发现新版本 {tag}。",
+        message=f"必须更新到 {tag}。" if required else f"发现新版本 {tag}。",
         **common,
+    )
+
+
+def _manifest_from_assets(
+    assets: Sequence[ReleaseAsset],
+    fetch: Transport,
+    headers: dict[str, str],
+    timeout_s: float,
+) -> tuple[str, bool]:
+    asset = update_json_asset(assets)
+    if asset is None:
+        return "", False
+    try:
+        status, _response_headers, body = fetch(asset.url, headers, timeout_s)
+    except Exception:
+        return "", False
+    if status != 200:
+        return "", False
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return "", False
+    return parse_update_manifest(payload)
+
+
+def _assets_from_names(tag: str, names: object) -> tuple[ReleaseAsset, ...]:
+    if not isinstance(names, Sequence) or isinstance(names, (str, bytes)):
+        return ()
+    assets: list[ReleaseAsset] = []
+    for item in names:
+        name = str(item or "").strip()
+        url = release_download_url(tag, name)
+        if url:
+            assets.append(ReleaseAsset(name=name, url=url))
+    return tuple(assets)
+
+
+def info_from_manifest(
+    payload: object,
+    current: str,
+    *,
+    skipped: str = "",
+    honor_skip: bool = True,
+) -> UpdateInfo | None:
+    """Build an update result from update.json. None when the document is unusable."""
+    if not isinstance(payload, Mapping):
+        return None
+    version = str(payload.get("version") or "").strip()
+    if parse_version(version) is None:
+        return None
+    tag = version if version.lower().startswith("v") else f"v{version}"
+    minimum, critical = parse_update_manifest(payload)
+    patches = parse_patch_table(payload.get("patch"))
+    names = list(payload.get("assets") or [])
+    for spec in patches:
+        if spec.asset not in names:
+            names.append(spec.asset)
+    if "update.json" not in names:
+        names.append("update.json")
+    assets = _assets_from_names(tag, names)
+    info = evaluate_release(
+        {
+            "tag_name": tag,
+            "draft": False,
+            "prerelease": False,
+            "html_url": f"https://github.com/{GITHUB_REPO}/releases/tag/{tag}",
+            "body": str(payload.get("notes") or "").strip(),
+            "published_at": "",
+            "assets": [
+                {"name": asset.name, "browser_download_url": asset.url, "size": asset.size}
+                for asset in assets
+            ],
+        },
+        current,
+        skipped=skipped,
+        honor_skip=honor_skip,
+        minimum_version=minimum,
+        critical=critical,
+    )
+    if patches:
+        info = replace(info, patches=patches)
+    return info
+
+
+def _tag_from_web_response(headers: Mapping[str, str], body: bytes) -> str | None:
+    final = str(headers.get("X-Tracklab-Final-Url") or headers.get("x-tracklab-final-url") or "")
+    tag = version_from_release_url(final)
+    if tag:
+        return tag
+    try:
+        text = body.decode("utf-8", "replace")
+    except Exception:
+        return None
+    return version_from_release_url(text)
+
+
+def _check_via_web(
+    fetch: Transport,
+    timeout_s: float,
+    current: str,
+    *,
+    skipped: str,
+    honor_skip: bool,
+) -> UpdateInfo | None:
+    web_headers = {
+        "User-Agent": _user_agent(current),
+        "Accept": "text/html",
+    }
+    try:
+        status, headers, body = fetch(GITHUB_RELEASES_PAGE, web_headers, timeout_s)
+    except Exception:
+        return None
+    if status != 200:
+        return None
+    tag = _tag_from_web_response(headers, body)
+    if tag is None:
+        return None
+    manifest_url = release_download_url(tag, "update.json")
+    if manifest_url is None:
+        return None
+    json_headers = {
+        "User-Agent": _user_agent(current),
+        "Accept": "application/json",
+    }
+    try:
+        status, _headers, body = fetch(manifest_url, json_headers, timeout_s)
+    except Exception:
+        return None
+    if status != 200:
+        return None
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return info_from_manifest(
+        payload, current, skipped=skipped, honor_skip=honor_skip
     )
 
 
@@ -368,6 +635,11 @@ def check_for_update(
         "X-GitHub-Api-Version": "2022-11-28",
     }
     fetch = transport or _default_transport
+    web = _check_via_web(
+        fetch, timeout_s, current, skipped=skipped, honor_skip=honor_skip
+    )
+    if web is not None:
+        return web
     try:
         status, response_headers, body = fetch(GITHUB_API_LATEST, headers, timeout_s)
     except Exception as exc:  # noqa: BLE001
@@ -422,7 +694,42 @@ def check_for_update(
             current=current,
             message="远端版本信息无法解析。",
         )
-    return evaluate_release(payload, current, skipped=skipped, honor_skip=honor_skip)
+    assets = parse_release_assets(payload)
+    document = _read_update_json(assets, fetch, headers, timeout_s)
+    minimum, critical = parse_update_manifest(document)
+    info = evaluate_release(
+        payload,
+        current,
+        skipped=skipped,
+        honor_skip=honor_skip,
+        minimum_version=minimum,
+        critical=critical,
+    )
+    patches = parse_patch_table(document.get("patch") if isinstance(document, Mapping) else None)
+    if patches:
+        info = replace(info, patches=patches)
+    return info
+
+
+def _read_update_json(
+    assets: Sequence[ReleaseAsset],
+    fetch: Transport,
+    headers: dict[str, str],
+    timeout_s: float,
+) -> object:
+    asset = update_json_asset(assets)
+    if asset is None:
+        return None
+    try:
+        status, _response_headers, body = fetch(asset.url, headers, timeout_s)
+    except Exception:
+        return None
+    if status != 200:
+        return None
+    try:
+        return json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
 
 
 def status_bar_message(info: UpdateInfo) -> str:

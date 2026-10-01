@@ -14,7 +14,7 @@ from typing import Iterable
 
 import numpy as np
 
-from ai.calibration import CalibrationState, uniform_state
+from ai.calibration import CalibrationMode, CalibrationState, uniform_state
 from ai.contracts import (
     EXPERIMENT_LABELS,
     ExperimentAnalysis,
@@ -25,6 +25,7 @@ from ai.contracts import (
     PhysicsResult,
     TrackResult,
 )
+from ai.depth_audit import DepthAuditState
 from ai.kinematics import KinematicSample, contiguous_segments, series_for_result
 from ai.schema import Point2D
 from engine.video_index import VideoInfo
@@ -137,6 +138,7 @@ def analyze_experiment(
     force_type: ExperimentType | None = None,
     shake_enabled: bool = False,
     shake_offsets: Iterable[tuple[float, float]] | None = None,
+    depth_audit: DepthAuditState | None = None,
 ) -> ExperimentAnalysis:
     cal = calibration or CalibrationState()
     clip = clip_id or (result.clip_id if result is not None else "")
@@ -152,6 +154,16 @@ def analyze_experiment(
     warnings: list[str] = []
     if not cal.active:
         missing.append("calibration")
+    if cal.camera_moved:
+        warnings.append("检测到机位移动，平面标定可能失效")
+    if cal.mode is CalibrationMode.PLANAR and cal.warning:
+        warnings.append(cal.warning)
+    if depth_audit is not None:
+        off = depth_audit.off_plane_frames()
+        if off:
+            warnings.append(f"{len(off)} 帧可能离开运动平面")
+        elif depth_audit.message:
+            warnings.append(depth_audit.message)
     if result is None or info is None:
         warnings.append("缺少轨迹或视频索引，无法分析")
         return ExperimentAnalysis(
@@ -164,7 +176,7 @@ def analyze_experiment(
             missing=missing,
         )
 
-    samples = series_for_result(result, info, calibration=cal)
+    samples = series_for_result(result, info, calibration=cal, depth_audit=depth_audit)
     visible = [item for item in samples if item.visible and item.x is not None and item.y is not None]
     coverage = (len(visible) / max(len(samples), 1)) if samples else 0.0
     mean_conf = float(np.mean([item.confidence for item in visible])) if visible else 0.0
@@ -311,6 +323,8 @@ def _si_value(
 def _calibration_quality(cal: CalibrationState) -> float:
     if not cal.active:
         return 0.4
+    if cal.camera_moved:
+        return 0.45
     if cal.warning:
         return 0.7
     return 1.0
@@ -390,6 +404,10 @@ def _score_models(
     proj = _fit_projectile(t, x, y, w, frames, span, pos_unit, speed_unit, accel_unit, cal.active)
     if proj is not None:
         missing = [] if cal.active else ["calibration"]
+        warnings = []
+        r2x = proj.parameters.get("r2x") or 0.0
+        if r2x < 0.98:
+            warnings.append("镜头运动、透视或跟踪误差使像素速度不完全满足理想斜抛")
         out.append(
             _finalize_candidate(
                 ExperimentType.PROJECTILE,
@@ -399,6 +417,7 @@ def _score_models(
                 cal_quality,
                 evidence=["x(t) 近线性且 y(t) 近二次"],
                 missing=missing,
+                warnings=warnings,
             )
         )
 
@@ -523,6 +542,37 @@ def _finalize_candidate(
         evidence=evidence,
         warnings=list(warnings or []),
         missing=list(missing or []),
+    )
+
+
+def projectile_velocity_model(
+    samples: list[KinematicSample],
+    *,
+    calibration: CalibrationState | None = None,
+) -> FitResult | None:
+    """Fit x=x0+v0x t, y=y0+v0y t+0.5 ay t^2 on the longest visible run."""
+    cal = calibration or CalibrationState()
+    segments = contiguous_segments(samples, "x")
+    segment = max(segments, key=len) if segments else []
+    if len(segment) < MIN_QUAD_POINTS:
+        return None
+    t = np.array([item.time_s for item in segment], dtype=np.float64)
+    x = np.array([item.x for item in segment], dtype=np.float64)
+    y = np.array([item.y for item in segment], dtype=np.float64)
+    w = np.array([max(item.confidence, 1e-3) for item in segment], dtype=np.float64)
+    frames = [item.frame for item in segment]
+    accel_unit = "m/s^2" if cal.active else "px/s^2"
+    return _fit_projectile(
+        t,
+        x,
+        y,
+        w,
+        frames,
+        _span(segment),
+        cal.position_unit,
+        cal.speed_unit,
+        accel_unit,
+        cal.active,
     )
 
 
@@ -702,6 +752,8 @@ def _fit_projectile(
         "v0y": float(y_coef[1]),
         "g": g if calibrated else None,
         "a_y": a_y,
+        "r2x": float(r2x),
+        "r2y": float(r2y),
     }
     units = {
         "x0": pos_unit,
@@ -836,6 +888,11 @@ def _autocorr_period(t: np.ndarray, centered: np.ndarray) -> float | None:
     corr = corr[len(corr) // 2 :]
     if corr[0] <= 0:
         return None
+    # Divide by the overlap so long lags are not pulled down (the raw sum
+    # shifts the peak toward shorter periods on a short clip).
+    overlap = len(sampled) - np.arange(len(corr))
+    corr = corr / np.maximum(overlap, 1) * len(sampled)
+    corr = corr[: max(len(corr) * 3 // 4, 3)]
     min_lag = max(2, int(0.08 / dt))
     peak_i = None
     peak_v = 0.0
@@ -848,18 +905,24 @@ def _autocorr_period(t: np.ndarray, centered: np.ndarray) -> float | None:
                 break
     if peak_i is None:
         return None
-    return float(peak_i * dt)
+    # Parabolic interpolation between lags for sub-frame precision.
+    y0, y1, y2 = float(corr[peak_i - 1]), float(corr[peak_i]), float(corr[peak_i + 1])
+    curvature = y0 - 2.0 * y1 + y2
+    shift = 0.5 * (y0 - y2) / curvature if curvature < 0 else 0.0
+    return float((peak_i + max(-0.5, min(0.5, shift))) * dt)
 
 
 def _zero_crossing_period(t: np.ndarray, centered: np.ndarray) -> float | None:
-    crossings = [
-        i
-        for i in range(1, len(centered))
-        if centered[i - 1] <= 0 < centered[i] or centered[i - 1] >= 0 > centered[i]
-    ]
+    crossings: list[float] = []
+    for i in range(1, len(centered)):
+        a, b = float(centered[i - 1]), float(centered[i])
+        if a <= 0 < b or a >= 0 > b:
+            # Linear interpolation of where the sign flips, not the frame after.
+            frac = a / (a - b) if a != b else 0.0
+            crossings.append(float(t[i - 1] + frac * (t[i] - t[i - 1])))
     if len(crossings) < 3:
         return None
-    halves = [float(t[crossings[i + 1]] - t[crossings[i]]) for i in range(len(crossings) - 1)]
+    halves = [crossings[i + 1] - crossings[i] for i in range(len(crossings) - 1)]
     halves = [item for item in halves if item > 1e-6]
     if not halves:
         return None

@@ -5,6 +5,9 @@ from collections.abc import Callable
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 
+from app.theme import color as theme_color
+from app.theme import qcolor as theme_qcolor
+
 IconDrawer = Callable[[QPainter, int, QColor], None]
 
 
@@ -215,26 +218,26 @@ def _zoom(p: QPainter, s: int, c: QColor) -> None:
 
 
 def play_icon() -> QIcon:
-    return _icon(_play, "#dddddd")
+    return _icon(_play, theme_color("icon_ink"))
 
 
 def pause_icon() -> QIcon:
-    return _icon(_pause, "#dddddd")
+    return _icon(_pause, theme_color("icon_ink"))
 
 
 def prev_icon() -> QIcon:
-    return _icon(_prev, "#c8c8c8")
+    return _icon(_prev, theme_color("icon_muted"))
 
 
 def next_icon() -> QIcon:
-    return _icon(_next, "#c8c8c8")
+    return _icon(_next, theme_color("icon_muted"))
 
 
 def loop_icon() -> QIcon:
-    icon = _icon(_loop, "#cccccc")
-    # Checked state paints on a light button, so the glyph has to flip dark.
-    icon.addPixmap(_pix(_loop, QColor("#1d1d1d")), QIcon.Mode.Normal, QIcon.State.On)
-    icon.addPixmap(_pix(_loop, QColor("#1d1d1d")), QIcon.Mode.Active, QIcon.State.On)
+    icon = _icon(_loop, theme_color("icon_loop"))
+    on = theme_qcolor("icon_on")
+    icon.addPixmap(_pix(_loop, on), QIcon.Mode.Normal, QIcon.State.On)
+    icon.addPixmap(_pix(_loop, on), QIcon.Mode.Active, QIcon.State.On)
     return icon
 
 

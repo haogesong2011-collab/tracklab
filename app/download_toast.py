@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -26,18 +25,14 @@ def format_bytes(n: int) -> str:
 
 
 class DownloadToast(QFrame):
+    """Progress card inside the main window, not a separate always-on-top window."""
+
     cancelled = Signal()
 
     def __init__(self, host: QWidget) -> None:
-        super().__init__(
-            host,
-            Qt.WindowType.Tool
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.NoDropShadowWindowHint,
-        )
+        super().__init__(host)
         self.setObjectName("downloadToast")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setFixedWidth(360)
         host_window = host.window()
@@ -132,12 +127,15 @@ class DownloadToast(QFrame):
             return
         self.adjustSize()
         margin = 16
-        status = 28
-        corner = host.mapToGlobal(host.rect().bottomRight())
+        status = 0
+        bar = getattr(host, "statusBar", None)
+        if callable(bar):
+            widget = bar()
+            if widget is not None and widget.isVisible():
+                status = widget.height()
+        rect = host.rect()
         self.move(
-            corner.x() - self.width() - margin,
-            corner.y() - self.height() - margin - status,
+            rect.right() - self.width() - margin,
+            rect.bottom() - self.height() - margin - status,
         )
-        app = QApplication.instance()
-        if app is not None and app.platformName() != "offscreen":
-            self.raise_()
+        self.raise_()

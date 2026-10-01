@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -16,6 +16,16 @@ from PySide6.QtWidgets import (
 )
 
 from ai.calibration import CalibrationMode, DEFAULT_RULER_LENGTH_M
+from app.theme import qcolor as theme_qcolor
+
+
+def _apply_dialog_ink(widget: QWidget) -> None:
+    palette = widget.palette()
+    ink = theme_qcolor("text_cal")
+    palette.setColor(QPalette.ColorRole.WindowText, ink)
+    palette.setColor(QPalette.ColorRole.Text, ink)
+    palette.setColor(QPalette.ColorRole.ButtonText, ink)
+    widget.setPalette(palette)
 
 
 PLANE_HINTS = ("原点", "X 端", "对角点", "Y 端")
@@ -40,12 +50,7 @@ class CalibrationDialog(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedWidth(300)
-        palette = self.palette()
-        light = QColor("#f5f5f5")
-        palette.setColor(QPalette.ColorRole.WindowText, light)
-        palette.setColor(QPalette.ColorRole.Text, light)
-        palette.setColor(QPalette.ColorRole.ButtonText, light)
-        self.setPalette(palette)
+        _apply_dialog_ink(self)
 
         self._uniform = QRadioButton("单尺（全图同一比例）")
         self._near_far = QRadioButton("双尺（近/远插值）")
@@ -125,6 +130,9 @@ class CalibrationDialog(QWidget):
         self._width_spin.valueChanged.connect(self._emit_plane)
         self._height_spin.valueChanged.connect(self._emit_plane)
         self._sync_mode_widgets()
+
+    def apply_theme(self) -> None:
+        _apply_dialog_ink(self)
 
     def _length_spin(self, tooltip: str) -> QDoubleSpinBox:
         spin = QDoubleSpinBox()
@@ -231,6 +239,7 @@ class CameraCalibDialog(QWidget):
         self.setWindowTitle("镜头标定")
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setFixedWidth(280)
+        _apply_dialog_ink(self)
         self._status = QLabel("在不同角度显示 ChArUco 棋盘，采集至少 3 张后计算内参。")
         self._status.setObjectName("panelHint")
         self._status.setWordWrap(True)
@@ -245,6 +254,9 @@ class CameraCalibDialog(QWidget):
         layout.addWidget(self._status)
         layout.addWidget(capture)
         layout.addWidget(compute)
+
+    def apply_theme(self) -> None:
+        _apply_dialog_ink(self)
 
     def set_status(self, text: str, *, error: bool = False) -> None:
         self._status.setText(text)
