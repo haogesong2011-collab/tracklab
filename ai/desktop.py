@@ -153,21 +153,12 @@ class TrackWorker(QObject):
             stride = 1
             image_size = None
             if tracker is None:
-                if self._tracking_target is TrackingTarget.SURFACE_POINT:
-                    from ai.tapir_tracker import BootsTapirTracker
+                from ai.sam2_tracker import Sam2Tracker
+                from ai.sam_runtime import SamRuntime, settings_for_mode
 
-                    # Precise mode adds the local 512 route; fast mode keeps
-                    # the bounded full-frame 256 route only.
-                    tracker = BootsTapirTracker(
-                        local_refine=self._track_mode is not TrackMode.FAST
-                    )
-                else:
-                    from ai.sam2_tracker import Sam2Tracker
-                    from ai.sam_runtime import SamRuntime, settings_for_mode
-
-                    spec, stride, image_size = settings_for_mode(self._track_mode)
-                    predictor = SamRuntime.instance().predictor_for(spec)
-                    tracker = Sam2Tracker(predictor=predictor, spec=spec)
+                spec, stride, image_size = settings_for_mode(self._track_mode)
+                predictor = SamRuntime.instance().predictor_for(spec)
+                tracker = Sam2Tracker(predictor=predictor, spec=spec)
 
             last_emit = 0.0
 

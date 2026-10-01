@@ -692,24 +692,6 @@ class MainWindow(QMainWindow):
         track_menu.addSeparator()
         track_menu.addAction(self._fast_track_action)
         track_menu.addAction(self._precise_track_action)
-        target_menu = track_menu.addMenu("追踪对象")
-        target_group = QActionGroup(self)
-        target_group.setExclusive(True)
-        self._center_target_action = QAction("物体中心（SAM 2）", self)
-        self._center_target_action.setCheckable(True)
-        self._center_target_action.setChecked(True)
-        self._surface_target_action = QAction("指定表面点（BootsTAPIR）", self)
-        self._surface_target_action.setCheckable(True)
-        target_group.addAction(self._center_target_action)
-        target_group.addAction(self._surface_target_action)
-        target_menu.addAction(self._center_target_action)
-        target_menu.addAction(self._surface_target_action)
-        self._center_target_action.triggered.connect(
-            lambda: self._set_tracking_target(TrackingTarget.OBJECT_CENTER)
-        )
-        self._surface_target_action.triggered.connect(
-            lambda: self._set_tracking_target(TrackingTarget.SURFACE_POINT)
-        )
         self._anti_interference_action = QAction("抗干扰（背景相减 + 运动预测）", self)
         self._anti_interference_action.setCheckable(True)
         self._anti_interference_action.setChecked(True)
@@ -1928,25 +1910,12 @@ class MainWindow(QMainWindow):
             self._list_panel.set_hint("请先 Control 拖动框选目标，或 Shift+左键点击加点")
             self.statusBar().showMessage("请先框选或加点，再开始跟踪", 5000)
             return
-        if layer.tracking_target is TrackingTarget.SURFACE_POINT:
-            positive = next(
-                (p for p in reversed(layer.prompts) if p.kind is PromptKind.POSITIVE),
-                None,
-            )
-            if positive is None:
-                self._list_panel.set_hint("指定表面点模式需要 Shift+左键点击一个表面点")
-                self.statusBar().showMessage("请先点击要追踪的表面点", 5000)
-                return
-            seed_prompt = positive
-            if not self._ensure_tapir_runtime():
-                return
-        else:
-            seed_prompt = next(
-                (p for p in reversed(layer.prompts) if p.kind != PromptKind.NEGATIVE),
-                layer.prompts[-1],
-            )
-            if not self._ensure_sam_runtime():
-                return
+        seed_prompt = next(
+            (p for p in reversed(layer.prompts) if p.kind != PromptKind.NEGATIVE),
+            layer.prompts[-1],
+        )
+        if not self._ensure_sam_runtime():
+            return
         self._pause()
         self._push_undo()
         seed = seed_prompt.center()
@@ -1981,10 +1950,7 @@ class MainWindow(QMainWindow):
         self._ai_track_action.setText("取消自动跟踪")
         self._list_panel.set_running(True)
         self._sync_undo_actions()
-        if layer.tracking_target is TrackingTarget.SURFACE_POINT:
-            kind = "指定点 · BootsTAPIR"
-        else:
-            kind = "快速Tiny" if self._track_mode is TrackMode.FAST else "精准Small"
+        kind = "快速Tiny" if self._track_mode is TrackMode.FAST else "精准Small"
         device = self._sam_device_label()
         self.statusBar().showMessage(
             f"跟踪 第 {start + 1}–{end + 1} 帧 · {kind} · {device}"

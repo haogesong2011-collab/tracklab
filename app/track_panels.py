@@ -119,11 +119,6 @@ class TrackListPanel(QWidget):
             item.setForeground(QColor(layer.color))
             item.setText(layer.name)
             bits: list[str] = []
-            bits.append(
-                "指定表面点"
-                if layer.tracking_target.value == "surface_point"
-                else "物体中心"
-            )
             if layer.result:
                 n = sum(1 for p in layer.result.points if p.usable_for_measurement())
                 bits.append(f"{n} 个点")
